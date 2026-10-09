@@ -33,19 +33,21 @@ const (
 	MapHealth       = "map.health"
 	LiveFeed        = "live.feed"
 	Compare         = "compare" // the supporter perk
+	Ask             = "ask"     // questions about the data, answered by Claude
 
 	LimitLookupsPerDay = "report.lookups_per_day"
 	LimitFeedItems     = "live.feed_items"
 	LimitRecent        = "recent.searches"
 	LimitCompare       = "compare.postcodes"
+	LimitAsk           = "ask.questions_per_day"
 )
 
 var requiredFeatures = []string{
 	ReportScore, ReportSections, ReportDetails, ReportTimeline, SafetyBreakdown,
-	MapCrime, MapAir, MapTransport, MapAircraft, MapOverflights, MapHealth, LiveFeed, Compare,
+	MapCrime, MapAir, MapTransport, MapAircraft, MapOverflights, MapHealth, LiveFeed, Compare, Ask,
 }
 
-var requiredLimits = []string{LimitLookupsPerDay, LimitFeedItems, LimitRecent, LimitCompare}
+var requiredLimits = []string{LimitLookupsPerDay, LimitFeedItems, LimitRecent, LimitCompare, LimitAsk}
 
 type Plan struct {
 	Name           string `yaml:"name" json:"name"`

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, api } from "./api";
+import AskBox from "./AskBox";
 import CompareChart from "./CompareChart";
 import { COMPARE_LETTERS, compareColor, samePostcode, type CompareItem } from "./compare";
 import { scoreColor } from "./Panel";
@@ -26,6 +27,8 @@ function bestIndexes(values: (number | null | undefined)[], better: "higher" | "
   if (nums.every((v) => v === target)) return new Set<number>(); // no winner if all equal
   return new Set(values.map((v, i) => (v === target ? i : -1)).filter((i) => i >= 0));
 }
+
+const ASK_COMPARE = ["Which is best for a light sleeper?", "Which is easiest to get home to late?", "Sum up how they differ at night"];
 
 const compact = (p: string) => p.replace(/\s/g, "").toUpperCase();
 
@@ -224,6 +227,10 @@ export default function CompareView({ session, postcodes, recents, onAdd, onRemo
               <p className="small muted cmp-foot">
                 <BestMark /> marks the best in each row. Scores are out of 100; hover a section score for its headline. Click a postcode for its full report.
               </p>
+              {/* Once every column has loaded, so the conversation doesn't restart under you. */}
+              {cols.every((c) => c.place || c.error) && (
+                <AskBox session={session} postcodes={cols.filter((c) => c.place).map((c) => c.place!.postcode)} suggestions={ASK_COMPARE} onUnlock={onUnlock} />
+              )}
             </div>
           )}
         </>

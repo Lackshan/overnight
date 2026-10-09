@@ -6,6 +6,7 @@
 - **Frontend:** Vite + React + MapLibre GL on MapTiler raster tiles (`web/`)
 - **Accounts:** Supabase Auth in the browser; the Go API verifies the token
 - **Payments:** Stripe Checkout, test mode
+- **Ask Overnight:** Claude (Anthropic API) answers questions from the report's own data
 - **Hosting:** Railway (Dockerfile)
 
 ## What's measured and what's estimated
@@ -62,6 +63,7 @@ Every gated feature and limit lives in [features.yaml](features.yaml). There are
 |---|---|---|---|
 | Night and day scores, every hour of the night, crime by category, live aircraft, map layers | ✓ | ✓ | ✓ |
 | Section details, flight paths map, night transport and medical cards, live feed, saved recent searches | | ✓ | ✓ |
+| Ask Overnight: questions about a postcode, answered by Claude (10 a day free, 50 for supporters; supporters can also ask about a comparison) | | ✓ | ✓ |
 | Compare up to 4 postcodes side by side: scores, hour by hour, sections and key facts, with lettered map pins and a shareable `/compare?pc=` link | | | ✓ |
 
 ## Run locally
@@ -98,6 +100,11 @@ Overnight is free; supporters make an optional one-off payment (£2.49) and get 
 
 Locally, forward webhooks with the Stripe CLI: `stripe listen --forward-to localhost:8080/api/stripe/webhook --events checkout.session.completed,checkout.session.async_payment_succeeded,charge.refunded,charge.dispute.created`. Supporters are also upgraded the moment they land back on the app, so this is a backup. To switch to a subscription instead, set `checkout_mode: subscription` in `features.yaml` and add the `customer.subscription.updated` and `customer.subscription.deleted` events.
 
+### Claude (Ask Overnight)
+Create a key at console.anthropic.com and set `ANTHROPIC_API_KEY`. Without it the Ask box doesn't appear. The model defaults to `claude-sonnet-5-5`; set `ANTHROPIC_MODEL` to change it.
+
+Claude gets the report exactly as the caller's plan sees it (scores, hourly values, sections, details, key facts and what's live right now, but no map layers), so it can't reveal anything locked. That's about 3,000 tokens per postcode. It's sent as a cached system block, so follow-up questions are cheaper. Each answer logs its token use. The daily cap is `ask.questions_per_day` in `features.yaml`, counted in memory per account (or IP), and a failed answer doesn't count.
+
 ### MapTiler
 Create a key, restrict it to your Railway domain (and localhost), and set `VITE_MAPTILER_KEY`. The map uses the `dataviz` and `dataviz-dark` styles.
 
@@ -114,6 +121,7 @@ Create a key, restrict it to your Railway domain (and localhost), and set `VITE_
 | `GET /api/session` | Your plan, what each feature looks like for you, limits, prices |
 | `GET /api/report/{postcode}` | The hour-by-hour report, stripped to your plan |
 | `GET /api/live?lat=&lon=&lines=` | Aircraft (with timestamps), nearby events and line status |
+| `POST /api/ask` | `{"postcodes":["SW111AA"],"messages":[{"role":"user","text":"..."}]}`; streams the answer as lines of JSON: `{"left":n}`, `{"text":"..."}` pieces, then `{"done":true}` or `{"error":"..."}` |
 | `GET /api/compare?pc=E16AN,SW111AA` | Supporters: scores, hourly line, section scores and key facts for up to `compare.postcodes` postcodes (the app asks for one at a time so each column fills in as soon as it's ready) |
 | `POST /api/billing/checkout` | Start Stripe Checkout |
 | `POST /api/billing/confirm` | Confirm a finished checkout (instant upgrade) |

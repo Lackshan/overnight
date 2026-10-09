@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"overnight/internal/ask"
 	"overnight/internal/auth"
 	"overnight/internal/billing"
 	"overnight/internal/config"
@@ -95,6 +96,12 @@ func main() {
 		Reports:  report.NewBuilder(hub),
 		Static:   web.Dist(),
 		DevMode:  os.Getenv("DEV_MODE") == "true",
+	}
+	if key := os.Getenv("ANTHROPIC_API_KEY"); key != "" {
+		srv.Asker = ask.New(key, os.Getenv("ANTHROPIC_MODEL"))
+		log.Printf("ask: on (%s)", env("ANTHROPIC_MODEL", ask.DefaultModel))
+	} else {
+		log.Printf("ask: off (set ANTHROPIC_API_KEY to turn it on)")
 	}
 	// Build reports for demo postcodes up front so the first click is instant.
 	// Wait for the first live poll so noise and transport have data.

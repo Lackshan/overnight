@@ -412,6 +412,26 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
 .cmp-pin { width: 26px; height: 26px; margin-bottom: 4px; border-radius: 50% 50% 50% 4px; transform: rotate(-45deg); color: #fff; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.35); }
 .cmp-pin span { transform: rotate(45deg); }
 
+/* Ask Overnight: questions answered by Claude from the report's data. */
+.ask { margin-top: 14px; padding: 12px; border: 0.5px solid var(--border); border-radius: 10px; background: var(--surface-sunk); }
+.ask-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ask-head h2 { margin: 0; }
+.ask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ask-chips .chip { height: auto; min-height: 28px; padding: 4px 10px; white-space: normal; text-align: left; box-shadow: none; color: var(--text); }
+.ask-thread { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.ask-q { align-self: flex-end; max-width: 85%; padding: 6px 10px; border-radius: 10px 10px 2px 10px; background: var(--accent); color: var(--accent-fg); font-size: 13px; }
+.ask-a { font-size: 13px; line-height: 1.55; }
+.ask-a p + p, .ask-a p + ul, .ask-a ul + p { margin-top: 6px; }
+.ask-a ul { margin: 4px 0 0; padding-left: 18px; }
+.ask-a li + li { margin-top: 2px; }
+.ask-typing { display: inline-block; width: 28px; height: 10px; background: radial-gradient(circle, var(--text-muted) 2.5px, transparent 3px) 0 50% / 9px 10px repeat-x; animation: ask-pulse 1s ease-in-out infinite; }
+@keyframes ask-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .ask-typing { animation: none; } }
+.ask-form { display: flex; gap: 6px; margin-top: 10px; }
+.ask-form input { flex: 1; min-width: 0; height: 32px; padding: 0 10px; font: inherit; font-size: 13px; color: var(--text); background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: var(--radius); }
+.ask .error { margin-top: 8px; }
+.ask-note { margin-top: 6px; font-size: 11px; }
+
 /* Phones: the report becomes a bottom sheet. */
 @media (max-width: 760px) {
   .panel { overflow-x: hidden; }
@@ -434,6 +454,8 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
   .cmp-pc { grid-row: 2; grid-column: 1 / -1; font-size: 12px; }
   .cmp-area { grid-row: 3; }
   .cmp-grid > * { padding: 7px 4px; }
-  .cmp-tray { bottom: calc(52vh + 52px); }
+  .cmp-tray { bottom: calc(52vh + 52px); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; white-space: nowrap; }
+  .cmp-tray > * { flex: none; }
+  .cmp-tray > button.primary { position: sticky; right: 0; box-shadow: -10px 0 8px var(--surface); }
   .search { width: calc(100vw - 112px); }
 }

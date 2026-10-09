@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import AskBox from "./AskBox";
 import GettingHome from "./GettingHome";
 import MedicalCard from "./MedicalCard";
 import type { LiveSnapshot, NightOption, Point, Report, Section, Session } from "./types";
@@ -37,6 +38,8 @@ export function hourLabel(h: number) {
   if (h === 12) return "midday";
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
+
+const ASK_SUGGESTIONS = ["Can I sleep with the windows open?", "How do I get home at 3am on a weekday?", "What's it like around 5am?", "Where's the nearest help at night?"];
 
 export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect, onPlaceSelect, recents = [], onCompare, inCompare }: Props) {
   // "night" and "day" show the summaries; a number shows that hour (Pro).
@@ -128,6 +131,8 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
             {!timeline && <Locked feature="report.timeline" session={session} onUnlock={onUnlock} compact text="Every hour" />}
           </div>
           {timeline && <Timeline hourly={r.hourly!} hour={typeof view === "number" ? view : null} onHour={setView} />}
+
+          <AskBox session={session} postcodes={[r.place.postcode]} suggestions={ASK_SUGGESTIONS} onUnlock={onUnlock} />
 
           {r.sections ? (
             <div className="sections">

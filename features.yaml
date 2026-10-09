@@ -65,6 +65,10 @@ features:
   live.feed:
     label: Happening nearby
     plans: [free, pro]
+  # Answered by Claude from the data the plan can see. Needs ANTHROPIC_API_KEY.
+  ask:
+    label: Ask questions about the data
+    plans: [free, pro]
 
 # Numeric limits per plan. 0 means unlimited. A plan missing from a limit
 # gets 0 (unlimited), so list every plan you want to cap.
@@ -88,3 +92,8 @@ limits:
     anonymous: 0
     free: 0
     pro: 4
+  # Questions to Claude per person per day. Each costs a little, so keep a cap.
+  ask.questions_per_day:
+    anonymous: 0
+    free: 10
+    pro: 50

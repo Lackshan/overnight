@@ -15,6 +15,7 @@ export interface Session {
   limits: Record<string, number>;
   plans: Record<PlanId, { name: string; price_label?: string }>;
   dev_mode: boolean;
+  ask_ready?: boolean; // the server has a Claude API key
 }
 
 export interface Place {

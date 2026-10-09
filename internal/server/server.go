@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 
+	"overnight/internal/ask"
 	"overnight/internal/auth"
 	"overnight/internal/billing"
 	"overnight/internal/config"
@@ -35,10 +36,12 @@ type Server struct {
 	Billing  *billing.Billing
 	Hub      *live.Hub
 	Reports  *report.Builder
-	Static   fs.FS // built frontend; nil in dev (Vite serves it)
-	DevMode  bool  // allows the X-Dev-Plan header for testing tiers locally
+	Asker    *ask.Asker // nil when ANTHROPIC_API_KEY isn't set
+	Static   fs.FS      // built frontend; nil in dev (Vite serves it)
+	DevMode  bool       // allows the X-Dev-Plan header for testing tiers locally
 
-	lookups lookupCounter
+	lookups   lookupCounter
+	questions dailyCounter
 
 	pathsMu sync.Mutex
 	paths   map[string]any
@@ -60,6 +63,7 @@ func (s *Server) Routes() http.Handler {
 		r.Get("/api/live", s.live)
 		r.Get("/api/flightpaths", s.flightPaths)
 		r.Get("/api/compare", s.compare)
+		r.Post("/api/ask", s.ask)
 		r.Get("/api/recent", s.requireUser(s.recent))
 		r.Post("/api/recent", s.requireUser(s.addRecent))
 		r.Delete("/api/recent", s.requireUser(s.deleteRecent))
@@ -110,11 +114,12 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		plans[id] = planInfo{Name: p.Name, PriceLabel: p.PriceLabel}
 	}
 	out := map[string]any{
-		"plan":     plan,
-		"features": features,
-		"limits":   limits,
-		"plans":    plans,
-		"dev_mode": s.DevMode,
+		"plan":      plan,
+		"features":  features,
+		"limits":    limits,
+		"plans":     plans,
+		"dev_mode":  s.DevMode,
+		"ask_ready": s.Asker != nil,
 	}
 	if u := auth.FromContext(r.Context()); u != nil {
 		out["email"] = u.Email

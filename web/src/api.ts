@@ -42,6 +42,39 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   return body as T;
 }
 
+export interface AskTurn {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export type AskEvent = { left: number } | { text: string } | { done: true } | { error: string };
+
+// Streams Claude's answer as it's written. Throws ApiError if the server
+// refuses before answering (plan, limits, unknown postcode).
+export async function ask(postcodes: string[], messages: AskTurn[], onEvent: (e: AskEvent) => void, signal?: AbortSignal) {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  if (devPlan) headers.set("X-Dev-Plan", devPlan);
+  const res = await fetch("/api/ask", { method: "POST", headers, body: JSON.stringify({ postcodes, messages }), signal });
+  if (!res.ok || !res.body) {
+    const body = await res.json().catch(() => ({}));
+    throw new ApiError(res.status, body.error ?? "Something went wrong.", body);
+  }
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) onEvent(JSON.parse(line));
+    }
+  }
+}
+
 export const api = {
   session: () => call<Session>("/api/session"),
   report: (postcode: string) => call<Report>(`/api/report/${encodeURIComponent(postcode.replace(/\s/g, ""))}`),
