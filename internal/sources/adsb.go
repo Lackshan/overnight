@@ -16,6 +16,7 @@ type Aircraft struct {
 	Lon      float64 `json:"lon"`
 	AltFt    int     `json:"alt_ft"` // 0 when on the ground
 	Speed    float64 `json:"speed_kt"`
+	VRate    int     `json:"vrate_fpm"` // climb (+) or descent (-) in feet per minute
 	Track    float64 `json:"track"`
 	Kind     string  `json:"kind"` // "police", "air_ambulance", "helicopter" or "plane"
 	Squawk   string  `json:"squawk,omitempty"`
@@ -40,6 +41,8 @@ func AircraftNear(ctx context.Context, lat, lon float64, radiusNM int) ([]Aircra
 			Heading  *float64        `json:"true_heading"`
 			Category string          `json:"category"`
 			Squawk   string          `json:"squawk"`
+			BaroRate *float64        `json:"baro_rate"`
+			GeomRate *float64        `json:"geom_rate"`
 			SeenPos  float64         `json:"seen_pos"` // seconds since the position was received
 		} `json:"ac"`
 	}
@@ -59,6 +62,11 @@ func AircraftNear(ctx context.Context, lat, lon float64, radiusNM int) ([]Aircra
 			Lat: *a.Lat, Lon: *a.Lon, AltFt: alt, Speed: a.Speed, Squawk: a.Squawk,
 			T: int64(res.Now - a.SeenPos*1000),
 		}
+		if a.BaroRate != nil {
+			ac.VRate = int(*a.BaroRate)
+		} else if a.GeomRate != nil {
+			ac.VRate = int(*a.GeomRate)
+		}
 		if a.Track != nil {
 			ac.Track = *a.Track
 		} else if a.Heading != nil {
@@ -70,27 +78,50 @@ func AircraftNear(ctx context.Context, lat, lon float64, radiusNM int) ([]Aircra
 	return out, nil
 }
 
-// Emergency-service aircraft we label on the map. National Police Air Service
-// helicopters fly as "NPAS…" with G-POL… registrations. Add more here.
+// Emergency-service aircraft we label on the map. Most don't broadcast a
+// telling callsign (the Met's G-MPSC sends "GMPSC"), so match registrations.
 var (
-	policeCallsigns   = []string{"NPAS"}
-	policeRegs        = []string{"G-POL"}
-	ambulanceRegs     = []string{"G-LNDN", "G-EHMS"} // London's Air Ambulance
-	ambulanceCallsign = []string{"HLE", "HELIMED"}
+	// National Police Air Service fleet, per its June 2026 FOI response,
+	// plus the H135s replacing it. The P68s are fixed-wing.
+	policeRegs = setOf(
+		"G-CPAO", "G-CPAS", "G-NWOI", "G-EMID", "G-POLA", "G-SUFK", "G-TVHB", "G-HEOI",
+		"G-POLB", "G-POLC", "G-POLD", "G-POLF", "G-POLG", "G-POLH", "G-POLJ", "G-POLU", "G-POLS",
+		"G-DCPB", "G-MPSA", "G-MPSB", "G-MPSC",
+		"G-POLV", "G-POLW", "G-POLX", "G-POLZ",
+		"G-NPAA", "G-NPAB", "G-NPAC", "G-NPAS",
+	)
+	policeCallsigns = []string{"NPAS", "UKP"}
+	// Air ambulances fly as "Helimed" (HLE) almost everywhere in the UK.
+	ambulanceCallsigns = []string{"HLE", "HELIMED"}
+	ambulanceRegs      = setOf("G-EHMS", "G-LNDN", "G-LAAA", "G-LAAB") // London's Air Ambulance
+	// Helicopter type designators, for when the ADS-B category is missing.
+	heliTypes = setOf(
+		"EC35", "EC45", "H145", "EC30", "EC55", "EC75", "AS50", "AS55", "AS65", "A109", "A119", "A139", "A169", "A189",
+		"EH10", "S76", "S92", "H60", "H47", "R22", "R44", "R66", "B06", "B407", "B429", "EXPL", "MD90", "H160",
+	)
 )
 
-// Classify labels emergency-service aircraft from callsign, registration and ADS-B category.
+// Classify labels emergency-service aircraft and helicopters.
 func Classify(a Aircraft, category string) string {
+	reg, cs := strings.ToUpper(a.Reg), strings.ToUpper(a.Callsign)
 	switch {
-	case hasPrefix(a.Callsign, policeCallsigns) || hasPrefix(a.Reg, policeRegs):
+	case policeRegs[reg] || hasPrefix(cs, policeCallsigns):
 		return "police"
-	case hasPrefix(a.Reg, ambulanceRegs) || hasPrefix(a.Callsign, ambulanceCallsign):
+	case ambulanceRegs[reg] || hasPrefix(cs, ambulanceCallsigns):
 		return "air_ambulance"
-	case category == "A7":
+	case category == "A7" || heliTypes[strings.ToUpper(a.Type)]:
 		return "helicopter"
 	default:
 		return "plane"
 	}
+}
+
+func setOf(xs ...string) map[string]bool {
+	m := make(map[string]bool, len(xs))
+	for _, x := range xs {
+		m[x] = true
+	}
+	return m
 }
 
 func hasPrefix(s string, prefixes []string) bool {

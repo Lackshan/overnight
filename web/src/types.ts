@@ -101,6 +101,7 @@ export interface Aircraft {
   lon: number;
   alt_ft: number;
   speed_kt: number;
+  vrate_fpm: number;
   track: number;
   kind: "police" | "air_ambulance" | "helicopter" | "plane";
   t: number; // when this position was received, Unix ms

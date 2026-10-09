@@ -4,6 +4,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 // MapLibre v6 ships its worker as a separate file; let Vite copy it and tell MapLibre where it is.
 import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { AircraftLayer } from "./aircraft";
+import { TYPES } from "./aircraftTypes";
+import { drawAircraft, drawRotor } from "./silhouettes";
 import type { Aircraft, Report } from "./types";
 
 setWorkerUrl(workerUrl);
@@ -91,7 +93,7 @@ export default function MapView({ target, report, live, visible, dark }: Props) 
     });
     map.current = m;
     // Inspect the map from the console with ?debug in the URL.
-    if (new URLSearchParams(location.search).has("debug")) (window as unknown as { overnightMap: MLMap }).overnightMap = m;
+    if (new URLSearchParams(location.search).has("debug")) Object.assign(window, { overnightMap: m, overnightDebug: { TYPES, drawAircraft, drawRotor } });
 
     // "style.load" fires as soon as the style is ready; "load" would also wait
     // for every initial tile, which delays the overlays on a slow connection.

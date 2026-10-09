@@ -60,12 +60,13 @@ p { margin: 0; }
 .error { color: var(--bad); margin-top: 12px; }
 .info { color: var(--accent); }
 
-button {
+/* App buttons only: MapLibre's own controls keep their built-in styles. */
+button:where(:not(.maplibregl-ctrl-attrib-button, .maplibregl-popup-close-button)) {
   font: inherit; font-size: 13px; color: var(--text); background: var(--surface);
   border: 0.5px solid var(--border-strong); border-radius: var(--radius); height: 32px; padding: 0 12px;
   cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
 }
-button:hover:not(:disabled) { background: var(--surface-sunk); }
+button:where(:not(.maplibregl-ctrl-attrib-button, .maplibregl-popup-close-button)):hover:not(:disabled) { background: var(--surface-sunk); }
 button:disabled { cursor: default; opacity: 0.6; }
 button.primary { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 button.primary:hover:not(:disabled) { background: var(--accent); filter: brightness(1.08); }
@@ -186,17 +187,30 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
 .menu p { overflow: hidden; text-overflow: ellipsis; }
 .menu button { justify-content: center; }
 
-.pin { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
-
-.ac { display: flex; align-items: center; gap: 4px; pointer-events: auto; cursor: default; }
-.ac-icon { color: #7f77dd; display: flex; transition: transform 0.6s ease; }
-.ac-helicopter .ac-icon, .ac-police .ac-icon, .ac-air_ambulance .ac-icon { width: 10px; height: 10px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15); }
-.ac-helicopter .ac-icon { background: #7f77dd; }
-.ac-police .ac-icon, .ac-air_ambulance .ac-icon { background: #ba7517; }
-.ac-label {
-  position: absolute; left: 14px; white-space: nowrap; font-size: 11px; padding: 1px 6px; color: var(--text-secondary);
-  background: var(--surface); border: 0.5px solid var(--border); border-radius: 4px;
+/* Map popups follow the app theme (MapLibre's default is white with inherited text). */
+.maplibregl-popup-content {
+  background: var(--surface); color: var(--text); font: 13px/1.45 var(--font);
+  border: 0.5px solid var(--border-strong); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px;
 }
+.maplibregl-popup-anchor-top .maplibregl-popup-tip, .maplibregl-popup-anchor-top-left .maplibregl-popup-tip, .maplibregl-popup-anchor-top-right .maplibregl-popup-tip { border-bottom-color: var(--surface); }
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip, .maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip, .maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip { border-top-color: var(--surface); }
+.maplibregl-popup-anchor-left .maplibregl-popup-tip { border-right-color: var(--surface); }
+.maplibregl-popup-anchor-right .maplibregl-popup-tip { border-left-color: var(--surface); }
+.maplibregl-popup-close-button { color: var(--text-muted); font-size: 18px; width: 26px; height: 26px; border-radius: 6px; }
+.maplibregl-popup-close-button:hover { background: var(--surface-sunk); color: var(--text); }
+
+.ac-popup { min-width: 190px; padding-right: 14px; }
+.ac-title { display: flex; align-items: baseline; gap: 8px; }
+.ac-title strong { font-size: 14px; font-family: var(--mono); }
+.ac-role { font-size: 11px; font-weight: 600; color: var(--ok); }
+.ac-model { color: var(--text-secondary); font-size: 12px; margin-top: 1px; }
+.ac-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+.ac-stats > div { display: flex; flex-direction: column; }
+.ac-k { font-size: 11px; color: var(--text-muted); }
+.ac-v { font-size: 15px; font-weight: 600; }
+.ac-climb { font-size: 12px; color: var(--text-secondary); margin-top: 6px; }
+
+.pin { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.4); display: flex; align-items: center; justify-content: center; padding: 16px; }
 .modal { position: relative; width: 360px; max-width: 100%; background: var(--surface); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow); }

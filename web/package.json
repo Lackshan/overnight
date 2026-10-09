@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build && touch dist/.keep",
     "preview": "vite preview",
-    "test": "node test/motion.test.ts"
+    "test": "node test/motion.test.ts && node test/style.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
@@ -15,6 +15,7 @@
     "react-dom": "^19.3.0"
   },
   "devDependencies": {
+    "@maplibre/maplibre-gl-style-spec": "^26.4.4",
     "@types/geojson": "^7946.0.16",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
