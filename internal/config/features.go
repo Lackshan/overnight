@@ -30,6 +30,7 @@ const (
 	MapTransport    = "map.transport"
 	MapAircraft     = "map.aircraft"
 	MapOverflights  = "map.overflights"
+	MapHealth       = "map.health"
 	LiveFeed        = "live.feed"
 
 	LimitLookupsPerDay = "report.lookups_per_day"
@@ -38,7 +39,7 @@ const (
 
 var requiredFeatures = []string{
 	ReportScore, ReportSections, ReportDetails, ReportTimeline, SafetyBreakdown,
-	MapCrime, MapAir, MapTransport, MapAircraft, MapOverflights, LiveFeed,
+	MapCrime, MapAir, MapTransport, MapAircraft, MapOverflights, MapHealth, LiveFeed,
 }
 
 var requiredLimits = []string{LimitLookupsPerDay, LimitFeedItems}

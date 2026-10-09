@@ -14,10 +14,11 @@
 |---|---|---|
 | Planes overhead | adsb.lol ADS-B | **Measured.** Distinct aircraft below 10,000 ft within ~1.5 km, by hour, from archived days plus everything recorded live |
 | Helicopters | adsb.lol ADS-B and MLAT | **Measured.** Minutes police (NPAS) and air ambulance helicopters spend overhead, by hour |
-| Getting home | TfL Unified API | Night buses within 500 m, Night Tube lines (Fri and Sat), stations by day |
+| Getting home | TfL Unified API | Night Tube stations from TfL night routes (Fri and Sat); all-night and 24-hour buses from real timetables, night by night; last weeknight buses |
 | Air | London Air Quality Network | **Measured.** Nearest monitor's average for each hour over the last 14 days |
 | Safety after dark | data.police.uk | **Estimated** by hour: the police publish no times, so each crime is spread over the hours its type usually happens |
-| Emergency help | NHS AmbSYS | **Sample figures** in `internal/sources/ambulance.json`. Paste in the latest London Ambulance Service numbers. |
+| Emergency help | London Fire Brigade incident records, NHS England AmbSYS, A&E list | **Measured.** First fire engine arrival in your ward at night and by day (Jan 2024 to Jul 2026, via `cmd/firedata`); nearest 24-hour A&Es (`internal/sources/hospitals.json`); London Ambulance Service response times, fetched monthly from NHS England |
+| Medical help | NHS England ODS, NHS trust pages | Nearest GP surgeries (all 1,142 active London practices, `cmd/gpdata`) with standard core hours, since practices don't publish theirs openly; 36 urgent treatment centres with their hours (`internal/sources/utcs.json`, compiled October 2026, shorter hours used where sources conflict); nearest A&E. Scored by what's open at each hour |
 
 Scores are heuristics in `internal/report/report.go`.
 
@@ -27,6 +28,15 @@ Scores are heuristics in `internal/report/report.go`.
 
 - `go run ./cmd/backfill -days 2026-10-07,2026-10-08` streams adsb.lol's daily archive (~4 GB a day, nothing stored but the result) and writes `internal/history/seed.json.gz`, which is embedded in the binary. Each day takes about 10 minutes. More days means steadier averages.
 - The running server records every position it sees and saves the grid every 10 minutes (to Supabase if `DATABASE_URL` is set, otherwise `./data`).
+
+## Refreshing the fire data
+
+Download "LFB Incident data from 2024 onwards.xlsx" from the [London Datastore](https://data.london.gov.uk/dataset/london-fire-brigade-incident-records), then run `go run ./cmd/firedata path/to/file.xlsx`. It rewrites `internal/sources/lfb_wards.json` (about 140 KB), which is embedded in the API.
+
+## Refreshing GP surgeries and urgent care
+
+- GP practices: `go run ./cmd/gpdata` downloads NHS England's ODS list and geocodes it into `internal/sources/gps.json`.
+- Urgent treatment centres: edit `internal/sources/utcs.json`. Hours look like `24/7` or `Mon-Fri 08:00-20:00; Sat-Sun 09:00-17:00`; a closing time past midnight (e.g. `08:00-02:00`) runs into the next day. The API refuses to start if any hours don't parse.
 
 ## Live aircraft
 

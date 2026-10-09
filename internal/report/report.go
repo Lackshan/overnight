@@ -40,6 +40,7 @@ type Report struct {
 	Sections    []Section         `json:"sections,omitempty"`
 	Breakdown   []CategoryCount   `json:"breakdown,omitempty"`
 	GettingHome *GettingHome      `json:"getting_home,omitempty"`
+	Medical     *Medical          `json:"medical,omitempty"`
 	Layers      Layers            `json:"layers"`
 	Lines       []string          `json:"lines"` // TfL line IDs serving the area, for the live feed
 	Locked      []string          `json:"locked"`
@@ -86,9 +87,12 @@ type CategoryCount struct {
 }
 
 type Layers struct {
-	Crime    []sources.Crime   `json:"crime,omitempty"`
-	Air      []sources.AirSite `json:"air,omitempty"`
-	Stations []sources.Station `json:"stations,omitempty"`
+	Crime    []sources.Crime    `json:"crime,omitempty"`
+	Air      []sources.AirSite  `json:"air,omitempty"`
+	Stations []sources.Station  `json:"stations,omitempty"`
+	AE       []sources.Hospital `json:"ae,omitempty"` // nearest 24-hour A&Es
+	GPs      []sources.GP       `json:"gps,omitempty"`
+	UTCs     []MedicalUTC       `json:"utcs,omitempty"`
 }
 
 type Builder struct {
@@ -166,6 +170,7 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 
 	prof := b.Hub.Grid.At(p.Lat, p.Lon)
 	gh, ghOK := b.nightOptions(ctx, stations, buses, weeks)
+	medical, med := medicalSection(p)
 	partial = partial || !ghOK || crimeErr != nil || stErr != nil || busErr != nil || airErr != nil
 	r := &Report{Place: p, RadiusM: RadiusM, Generated: time.Now(), HistoryDays: b.Hub.Grid.DaysObserved(), partial: partial}
 
@@ -176,13 +181,15 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 		b.gettingHomeSection(stations, gh, stErr, busErr),
 		airSection(p, airSites, airHist),
 		safetySection(crimes, crimeErr),
-		emergencySection(prof),
+		emergencySection(ctx, p, prof),
+		medical,
 	}
 	r.Breakdown = breakdown(crimes)
 	r.GettingHome = gh
+	r.Medical = med
 
 	// Overall score per hour, weighted across sections that have data.
-	weights := map[string]float64{"aircraft": .25, "helicopters": .1, "getting_home": .2, "air": .15, "safety": .2, "emergency": .1}
+	weights := map[string]float64{"aircraft": .25, "helicopters": .1, "getting_home": .2, "air": .15, "safety": .2, "emergency": .1, "medical": .1}
 	var hourly [24]float64
 	for h := 0; h < 24; h++ {
 		var sum, w float64
@@ -214,7 +221,7 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 	r.Night = &Score{Score: n, Band: nightBand(n)}
 	r.Day = &Score{Score: d, Band: dayBand(d)}
 
-	r.Layers = Layers{Crime: crimes, Stations: stations}
+	r.Layers = Layers{Crime: crimes, Stations: stations, AE: sources.NearestAE(p.Lat, p.Lon, 2), GPs: med.GPs, UTCs: med.UTCs}
 	for _, s := range airSites {
 		if live.DistanceM(p.Lat, p.Lon, s.Lat, s.Lon) <= 10000 {
 			r.Layers.Air = append(r.Layers.Air, s)
@@ -644,26 +651,164 @@ func breakdown(crimes []sources.Crime) []CategoryCount {
 	return out
 }
 
-// Emergency: ambulance response times (London-wide) and air ambulance activity here.
-func emergencySection(p history.Profile) Section {
-	a := sources.LondonAmbulance()
-	ratio := float64(a.Cat2MeanSec) / float64(a.Cat2TargetSec)
-	base := clamp(90 - 50*(ratio-1))
-	s := Section{ID: "emergency", Label: "Emergency help", Unit: "air ambulance minutes", Measured: true, Sample: a.Sample}
+// Medical is where to get seen: GP surgeries, urgent treatment centres, A&E.
+type Medical struct {
+	GPs       []sources.GP       `json:"gps"`
+	GPHours   *sources.Hours     `json:"gp_hours"` // standard core hours; practices don't publish theirs openly
+	GPsWithin int                `json:"gps_within_1km"`
+	UTCs      []MedicalUTC       `json:"utcs"`
+	AE        []sources.Hospital `json:"ae"`
+}
+
+type MedicalUTC struct {
+	sources.NearbyUTC
+	Hours *sources.Hours `json:"schedule"`
+}
+
+// care distance score: 100 within 800 m, 30 at 5 km.
+func careScore(d float64) float64 { return clamp(100 - (d-800)/4200*70) }
+
+// medicalSection scores each hour of a weekday by the best place you could
+// actually be seen then: a GP in core hours, an open UTC, or (weighted down,
+// since it's for emergencies) A&E.
+func medicalSection(p *sources.Postcode) (Section, *Medical) {
+	m := &Medical{
+		GPs:       sources.NearestGPs(p.Lat, p.Lon, 3),
+		GPHours:   sources.GPCoreHours,
+		GPsWithin: sources.GPsWithin(p.Lat, p.Lon, 1000),
+		AE:        sources.NearestAE(p.Lat, p.Lon, 1),
+	}
+	// The three nearest centres, plus the nearest 24-hour one if those aren't.
+	near := sources.NearestUTCs(p.Lat, p.Lon, 12)
+	has24 := false
+	for i, u := range near {
+		if i < 3 || (!has24 && u.Hours.Open24) {
+			m.UTCs = append(m.UTCs, MedicalUTC{NearbyUTC: u, Hours: u.Hours})
+			has24 = has24 || u.Hours.Open24
+		}
+	}
+	s := Section{ID: "medical", Label: "Medical help", Unit: "km to the nearest open service", Measured: true}
+	const weekday = 2 // a Wednesday
 	for h := 0; h < 24; h++ {
-		s.hourValue[h] = p.AmbulanceMin[h]
-		s.hourScore[h] = base
+		best, bestD := 0.0, math.NaN()
+		try := func(d, weight float64) {
+			if sc := careScore(d) * weight; sc > best {
+				best, bestD = sc, d
+			}
+		}
+		if len(m.GPs) > 0 && m.GPHours.OpenAt(weekday, h*60+30) {
+			try(m.GPs[0].Distance, 1)
+		}
+		for _, u := range m.UTCs {
+			if u.Hours.OpenAt(weekday, h*60+30) {
+				try(u.Distance, 0.95)
+			}
+		}
+		if len(m.AE) > 0 {
+			try(m.AE[0].Distance, 0.7)
+		}
+		s.hourScore[h] = best
+		s.hourValue[h] = round1(bestD / 1000)
 	}
-	s.Headline = fmt.Sprintf("Category 2 ambulances take %s on average (target %s)", mins(a.Cat2MeanSec), mins(a.Cat2TargetSec))
-	s.DayLine = "London Ambulance Service covers all of London as one area"
-	s.Details = []Detail{
-		{Label: "Category 1 (life-threatening)", Value: fmt.Sprintf("%s average, target %s", mins(a.Cat1MeanSec), mins(a.Cat1TargetSec))},
-		{Label: "Air ambulance nearby", Value: fmt.Sprintf("%.0f min a day", sum(p.AmbulanceMin, allHours()))},
+	var open24 *MedicalUTC
+	for i := range m.UTCs {
+		if m.UTCs[i].Hours.Open24 && (open24 == nil || m.UTCs[i].Distance < open24.Distance) {
+			open24 = &m.UTCs[i]
+		}
 	}
-	if a.Sample {
-		s.Note = "Sample response times. Replace with the latest AmbSYS figures."
+	// Overnight: the nearest 24-hour UTC, and A&E too when it's notably closer.
+	var ae *sources.Hospital
+	if len(m.AE) > 0 {
+		ae = &m.AE[0]
 	}
+	switch {
+	case open24 != nil && (ae == nil || ae.Distance >= open24.Distance*0.7):
+		s.Headline = fmt.Sprintf("Overnight, the nearest 24-hour urgent treatment centre is %s, %s", open24.Site, km(open24.Distance))
+	case open24 != nil:
+		s.Headline = fmt.Sprintf("Overnight, the nearest 24-hour urgent treatment centre is %s, %s; A&E at %s is %s", open24.Site, km(open24.Distance), ae.Name, km(ae.Distance))
+	case ae != nil:
+		s.Headline = fmt.Sprintf("Overnight, the nearest 24-hour care is A&E at %s, %s. NHS 111 can advise", ae.Name, km(ae.Distance))
+	}
+	if len(m.GPs) > 0 {
+		s.DayLine = fmt.Sprintf("%s within 1 km; nearest is %s, %s", plural(m.GPsWithin, "GP surgery"), m.GPs[0].Name, km(m.GPs[0].Distance))
+		s.DayLine = strings.Replace(s.DayLine, "surgerys", "surgeries", 1)
+	}
+	s.Note = "GP locations from NHS England (ODS). Practices don't publish hours openly, so these are standard core hours (8am–6:30pm weekdays); many open longer. Urgent treatment centre hours are from NHS and hospital trust pages; check before you travel."
+	return s.finish(), m
+}
+
+// Emergency: how fast a fire engine reaches this ward (by hour), the nearest
+// 24-hour A&E, and London Ambulance Service response times.
+func emergencySection(ctx context.Context, p *sources.Postcode, prof history.Profile) Section {
+	f, area, fd := sources.Fire(p.WardCode, p.Borough)
+	ae := sources.NearestAE(p.Lat, p.Lon, 2)
+	amb := sources.LondonAmbulance(ctx)
+	s := Section{ID: "emergency", Label: "Emergency help", Unit: "minutes for a fire engine", Measured: true}
+
+	// Ambulance: London-wide, scored on category 2 (strokes, chest pain) against its 18-minute standard.
+	ambScore := clamp(90 - 50*(float64(amb.Cat2MeanSec)/float64(amb.Cat2TargetSec)-1))
+	// A&E: within 2 km is excellent, 8 km poor.
+	aeScore := 100.0
+	if len(ae) > 0 {
+		aeScore = clamp(100 - (ae[0].Distance-2000)/6000*70)
+	}
+	// Fire: this area's average shaped by London's hour-by-hour pattern (the
+	// ward has too few incidents per hour to average each hour on its own).
+	for h := 0; h < 24; h++ {
+		t := float64(f.MeanSec)
+		if fd.London.MeanSec > 0 && fd.Hourly[h] > 0 {
+			t *= float64(fd.Hourly[h]) / float64(fd.London.MeanSec)
+		}
+		if h >= 23 || h < 6 {
+			// Use the area's own night average around the clock's night hours.
+			t = float64(f.NightMeanSec) * float64(fd.Hourly[h]) / float64(max(fd.London.NightMeanSec, 1))
+		}
+		fireScore := clamp(100 - (t-240)/240*80) // 4 min scores 100, 8 min 20
+		s.hourValue[h] = round1(t / 60)
+		s.hourScore[h] = 0.45*fireScore + 0.3*aeScore + 0.25*ambScore
+	}
+
+	where := map[string]string{"ward": f.Name, "borough": f.Name, "london": "London"}[area]
+	s.Headline = fmt.Sprintf("Fire engines reach %s in %s on average at night (London %s)", where, mins(f.NightMeanSec), mins(fd.London.NightMeanSec))
+	s.DayLine = fmt.Sprintf("%s by day (London %s)", mins(f.DayMeanSec), mins(fd.London.DayMeanSec))
+	if len(ae) > 0 {
+		s.Headline += fmt.Sprintf(". Nearest 24-hour A&E: %s, %s", ae[0].Name, km(ae[0].Distance))
+		s.DayLine += fmt.Sprintf(". Nearest A&E: %s, %s", ae[0].Name, km(ae[0].Distance))
+	}
+	for _, h := range ae {
+		v := km(h.Distance)
+		if h.Distance >= 200 {
+			v += " as the crow flies"
+		}
+		s.Details = append(s.Details, Detail{Label: h.Name + " (24-hour A&E)", Value: v})
+	}
+	s.Details = append(s.Details,
+		Detail{Label: "First fire engine, 9 in 10 calls", Value: "within " + mins(f.P90Sec)},
+		Detail{Label: "Night fires nearby", Value: fmt.Sprintf("%.0f a year in %s", f.NightFiresYear, where)},
+		Detail{Label: "Ambulance, life-threatening (cat 1)", Value: fmt.Sprintf("%s average across London (England %s, target 7m)", mins(amb.Cat1MeanSec), mins(amb.EngCat1MeanSec))},
+		Detail{Label: "Ambulance, emergency (cat 2)", Value: fmt.Sprintf("%s average across London (England %s, target 18m)", mins(amb.Cat2MeanSec), mins(amb.EngCat2MeanSec))},
+		Detail{Label: "Air ambulance nearby", Value: fmt.Sprintf("%.0f min a day", sum(prof.AmbulanceMin, allHours()))},
+	)
+	note := fmt.Sprintf("Fire: London Fire Brigade incident records, %s", fd.Period)
+	if area == "borough" {
+		note += " (borough average: too few incidents to average this ward)"
+	}
+	note += fmt.Sprintf(". Ambulance: NHS England AmbSYS, %s", amb.Period)
+	if !amb.Live {
+		note += " (built-in figures; NHS England couldn't be reached)"
+	}
+	s.Note = note + "."
 	return s.finish()
+}
+
+func km(m float64) string {
+	if m < 200 {
+		return "on the doorstep"
+	}
+	if m < 1000 {
+		return fmt.Sprintf("%.0f m", math.Round(m/10)*10)
+	}
+	return fmt.Sprintf("%.1f km", m/1000)
 }
 
 func plural(n int, word string) string {
@@ -740,6 +885,7 @@ func Gate(r *Report, plan string, f *config.Features) *Report {
 	}
 	if !f.Can(plan, config.ReportDetails) {
 		out.GettingHome = nil
+		out.Medical = nil
 	}
 	if lock(config.SafetyBreakdown) {
 		out.Breakdown = nil
@@ -752,6 +898,9 @@ func Gate(r *Report, plan string, f *config.Features) *Report {
 	}
 	if lock(config.MapTransport) {
 		out.Layers.Stations = nil
+	}
+	if lock(config.MapHealth) {
+		out.Layers.AE, out.Layers.GPs, out.Layers.UTCs = nil, nil, nil
 	}
 	return &out
 }

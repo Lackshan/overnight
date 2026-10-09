@@ -56,6 +56,9 @@ features:
   map.transport:
     label: Stations map layer
     plans: [anonymous, free, pro]
+  map.health:
+    label: GPs, urgent care and A&E on the map
+    plans: [anonymous, free, pro]
   live.feed:
     label: Happening nearby
     plans: [free, pro]

@@ -7,11 +7,23 @@ import { AircraftLayer } from "./aircraft";
 import { TYPES } from "./aircraftTypes";
 import { drawAircraft, drawRotor } from "./silhouettes";
 import { badgeClass, badgeStyle, isRail, optionKey } from "./nightBadges";
+import { AE_BADGE, GP_BADGE, addPlaceMarker, aeBlock, gpBlock, groupByPlace, nightBlock, popupBox, utcBadge, utcBlock, type Badge, type PlaceMarker } from "./placeMarkers";
 import type { Aircraft, FlightPaths, NightOption, Report } from "./types";
+
+const NIGHT_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+// "Every night, about every 20 min" or "Friday and Saturday nights, about every 10 min".
+function nightsText(o: NightOption) {
+  const on = o.nights.map((n, i) => (n ? i : -1)).filter((i) => i >= 0);
+  const days = on.length === 7 ? "Every night" : on.length === 2 && on[0] === 4 && on[1] === 5 ? "Friday and Saturday nights" : `${on.map((i) => NIGHT_NAMES[i]).join(", ")} nights`;
+  const freq = Math.max(...on.map((i) => o.nights[i]!.per_hour));
+  const mins = Math.max(5, Math.round(60 / freq / 5) * 5);
+  return `${days}, 1am–5am: up to every ${mins} min${o.nights[on[0]]?.approx ? " (approx.)" : ""}`;
+}
 
 setWorkerUrl(workerUrl);
 
-export type LayerKey = "aircraft" | "overflights" | "crime" | "air" | "transport";
+export type LayerKey = "aircraft" | "overflights" | "crime" | "air" | "transport" | "health";
 
 interface Props {
   target: { lat: number; lon: number } | null;
@@ -90,6 +102,7 @@ const layerIds: Record<Exclude<LayerKey, "aircraft">, string[]> = {
   crime: ["crime-heat", "crime-points"],
   air: ["air-halo", "air-points"],
   transport: ["stations"],
+  health: [], // DOM markers, toggled separately
 };
 
 const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, live, visible, dark, onBounds, flightPaths, nightHighlight }, ref) {
@@ -115,7 +128,7 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, 
       if (m) m.flyTo({ center: [lon, lat], zoom: Math.max(m.getZoom(), 16), duration: 700, padding: sidePadding() });
     },
   }));
-  const nightMarkers = useRef<{ marker: Marker; keys: string[]; el: HTMLElement }[]>([]);
+  const nightMarkers = useRef<PlaceMarker[]>([]);
 
   // Create the map once and never re-create it.
   useEffect(() => {
@@ -270,48 +283,17 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, 
   }, [flightPaths]);
 
   // Night bus stops and Night Tube stations, marked with the same badges as
-  // the panel. Routes sharing a stop share one marker.
+  // the panel. Routes sharing a stop share one marker; click for details.
   useEffect(() => {
     const m = map.current;
     for (const n of nightMarkers.current) n.marker.remove();
     nightMarkers.current = [];
     if (!m) return;
-    const groups = new Map<string, NightOption[]>();
-    for (const o of report?.getting_home?.options ?? []) {
-      const k = `${o.lat.toFixed(5)},${o.lon.toFixed(5)}`;
-      groups.set(k, [...(groups.get(k) ?? []), o]);
-    }
-    for (const g of groups.values()) {
+    for (const g of groupByPlace(report?.getting_home?.options ?? [])) {
       g.sort((a, b) => Number(isRail(b)) - Number(isRail(a))); // rail first
-      const el = document.createElement("div");
-      el.className = "nt-marker";
-      const card = document.createElement("div");
-      card.className = "nt-badges";
-      for (const o of g.slice(0, 4)) {
-        const b = document.createElement("span");
-        b.className = badgeClass(o);
-        Object.assign(b.style, badgeStyle(o));
-        b.textContent = o.line;
-        card.appendChild(b);
-      }
-      if (g.length > 4) {
-        const more = document.createElement("span");
-        more.className = "nt-more";
-        more.textContent = `+${g.length - 4}`;
-        card.appendChild(more);
-      }
-      const pin = document.createElement("div");
-      pin.className = "nt-pin";
-      // MapLibre positions the marker with a transform on `el`, so any
-      // scaling happens on this inner wrapper instead.
-      const inner = document.createElement("div");
-      inner.className = "nt-inner";
-      inner.append(card, pin);
-      el.append(inner);
-      el.title = `${g[0].where}: ${g.map((o) => o.line).join(", ")}`;
-      el.style.display = latest.current.visible.transport ? "" : "none";
-      const marker = new Marker({ element: el, anchor: "bottom" }).setLngLat([g[0].lon, g[0].lat]).addTo(m);
-      nightMarkers.current.push({ marker, keys: g.map(optionKey), el });
+      const badges = g.map((o) => ({ text: o.line, className: badgeClass(o), style: badgeStyle(o) }));
+      const details = () => popupBox(...g.map((o, i) => nightBlock(badges[i], isRail(o) ? `${o.line} Night ${o.kind === "night_overground" ? "Overground" : "Tube"}` : `Route ${o.line}`, o.where, o.distance_m, nightsText(o))));
+      nightMarkers.current.push(addPlaceMarker(m, [g[0].lon, g[0].lat], badges, g.map(optionKey), `${g[0].where}: ${g.map((o) => o.line).join(", ")}`, details, latest.current.visible.transport));
     }
   }, [report]);
 
@@ -321,8 +303,37 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, 
     }
   }, [visible.transport]);
 
+  // GPs, urgent treatment centres and A&Es, with the same badge markers.
+  // Everything at one site (a hospital's A&E and UTC, GPs sharing a health
+  // centre) shares one card; click for name, address and hours.
+  const healthMarkers = useRef<PlaceMarker[]>([]);
   useEffect(() => {
-    for (const n of nightMarkers.current) {
+    const m = map.current;
+    for (const n of healthMarkers.current) n.marker.remove();
+    healthMarkers.current = [];
+    if (!m || !report) return;
+    type Item = { lat: number; lon: number; key: string; badge: Badge; block: () => HTMLElement; order: number; label: string };
+    const gpHours = report.medical?.gp_hours;
+    const items: Item[] = [
+      ...(report.layers.ae ?? []).map((h) => ({ lat: h.lat, lon: h.lon, key: `ae:${h.name}`, badge: AE_BADGE, block: () => aeBlock(h), order: 0, label: `${h.name} A&E` })),
+      ...(report.layers.utcs ?? []).map((u) => ({ lat: u.lat, lon: u.lon, key: `utc:${u.name}`, badge: utcBadge(u), block: () => utcBlock(u), order: 1, label: u.name })),
+      ...(report.layers.gps ?? []).map((g) => ({
+        lat: g.lat, lon: g.lon, key: `gp:${g.code}`, badge: GP_BADGE, order: 2, label: g.name,
+        block: () => gpBlock(g, gpHours ?? { open24: false, days: [], text: "Weekdays 8am–6:30pm" }),
+      })),
+    ];
+    for (const g of groupByPlace(items)) {
+      g.sort((a, b) => a.order - b.order);
+      healthMarkers.current.push(addPlaceMarker(m, [g[0].lon, g[0].lat], g.map((x) => x.badge), g.map((x) => x.key), g.map((x) => x.label).join(" · "), () => popupBox(...g.map((x) => x.block())), latest.current.visible.health));
+    }
+  }, [report]);
+
+  useEffect(() => {
+    for (const n of healthMarkers.current) n.el.style.display = visible.health ? "" : "none";
+  }, [visible.health]);
+
+  useEffect(() => {
+    for (const n of [...nightMarkers.current, ...healthMarkers.current]) {
       const on = !!nightHighlight && n.keys.includes(nightHighlight);
       n.el.classList.toggle("hl", on);
       n.el.classList.toggle("dim", !!nightHighlight && !on);

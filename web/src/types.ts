@@ -83,10 +83,14 @@ export interface Report {
   sections?: Section[];
   breakdown?: { category: string; label: string; count: number }[];
   getting_home?: GettingHome;
+  medical?: Medical;
   layers: {
     crime?: Crime[];
     air?: AirSite[];
     stations?: Station[];
+    ae?: Hospital[];
+    gps?: GP[];
+    utcs?: UTC[];
   };
   lines: string[];
   locked: string[];
@@ -150,4 +154,46 @@ export interface NightOption {
 export interface GettingHome {
   options: NightOption[];
   last_buses?: { route: string; stop: string; time: string }[];
+}
+
+// Weekly opening schedule: days[0] is Monday; minutes after midnight.
+export interface Hours {
+  open24: boolean;
+  days: ({ from: number; to: number }[] | null)[];
+  text: string;
+}
+
+export interface Hospital {
+  name: string;
+  postcode: string;
+  lat: number;
+  lon: number;
+  distance_m: number;
+}
+
+export interface GP extends Hospital {
+  code: string;
+  address: string;
+  phone?: string;
+}
+
+export interface UTC {
+  name: string;
+  site: string;
+  postcode: string;
+  lat: number;
+  lon: number;
+  distance_m: number;
+  walkIn: boolean | null;
+  note?: string;
+  source: string;
+  schedule: Hours;
+}
+
+export interface Medical {
+  gps: GP[];
+  gp_hours: Hours;
+  gps_within_1km: number;
+  utcs: UTC[];
+  ae: Hospital[];
 }

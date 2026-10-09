@@ -1,0 +1,179 @@
+{
+ "source": "Major 24-hour (type 1) emergency departments in and near London; postcodes geocoded with postcodes.io, October 2026",
+ "hospitals": [
+  {
+   "name": "University College Hospital",
+   "postcode": "NW1 2BU",
+   "lat": 51.52489,
+   "lon": -0.13689
+  },
+  {
+   "name": "Royal Free Hospital",
+   "postcode": "NW3 2QG",
+   "lat": 51.55323,
+   "lon": -0.1653
+  },
+  {
+   "name": "Whittington Hospital",
+   "postcode": "N19 5NF",
+   "lat": 51.56648,
+   "lon": -0.13907
+  },
+  {
+   "name": "North Middlesex University Hospital",
+   "postcode": "N18 1QX",
+   "lat": 51.6131,
+   "lon": -0.07372
+  },
+  {
+   "name": "Barnet Hospital",
+   "postcode": "EN5 3DJ",
+   "lat": 51.65065,
+   "lon": -0.21462
+  },
+  {
+   "name": "Royal London Hospital",
+   "postcode": "E1 1FR",
+   "lat": 51.5187,
+   "lon": -0.06014
+  },
+  {
+   "name": "Homerton University Hospital",
+   "postcode": "E9 6SR",
+   "lat": 51.55063,
+   "lon": -0.04607
+  },
+  {
+   "name": "Newham University Hospital",
+   "postcode": "E13 8SL",
+   "lat": 51.52278,
+   "lon": 0.03474
+  },
+  {
+   "name": "Whipps Cross University Hospital",
+   "postcode": "E11 1NR",
+   "lat": 51.57883,
+   "lon": 0.00267
+  },
+  {
+   "name": "Queen's Hospital, Romford",
+   "postcode": "RM7 0AG",
+   "lat": 51.56865,
+   "lon": 0.17906
+  },
+  {
+   "name": "King George Hospital, Ilford",
+   "postcode": "IG3 8YB",
+   "lat": 51.58055,
+   "lon": 0.11213
+  },
+  {
+   "name": "St Mary's Hospital",
+   "postcode": "W2 1NY",
+   "lat": 51.51697,
+   "lon": -0.17355
+  },
+  {
+   "name": "Charing Cross Hospital",
+   "postcode": "W6 8RF",
+   "lat": 51.48705,
+   "lon": -0.21991
+  },
+  {
+   "name": "Chelsea and Westminster Hospital",
+   "postcode": "SW10 9NH",
+   "lat": 51.48431,
+   "lon": -0.18162
+  },
+  {
+   "name": "West Middlesex University Hospital",
+   "postcode": "TW7 6AF",
+   "lat": 51.47365,
+   "lon": -0.32441
+  },
+  {
+   "name": "Hillingdon Hospital",
+   "postcode": "UB8 3NN",
+   "lat": 51.52608,
+   "lon": -0.46115
+  },
+  {
+   "name": "Northwick Park Hospital",
+   "postcode": "HA1 3UJ",
+   "lat": 51.57541,
+   "lon": -0.32201
+  },
+  {
+   "name": "Ealing Hospital",
+   "postcode": "UB1 3HW",
+   "lat": 51.50761,
+   "lon": -0.34547
+  },
+  {
+   "name": "St Thomas' Hospital",
+   "postcode": "SE1 7EH",
+   "lat": 51.49796,
+   "lon": -0.11888
+  },
+  {
+   "name": "King's College Hospital",
+   "postcode": "SE5 9RS",
+   "lat": 51.46808,
+   "lon": -0.09389
+  },
+  {
+   "name": "University Hospital Lewisham",
+   "postcode": "SE13 6LH",
+   "lat": 51.45302,
+   "lon": -0.01792
+  },
+  {
+   "name": "Queen Elizabeth Hospital, Woolwich",
+   "postcode": "SE18 4QH",
+   "lat": 51.47819,
+   "lon": 0.05007
+  },
+  {
+   "name": "Princess Royal University Hospital",
+   "postcode": "BR6 8ND",
+   "lat": 51.36624,
+   "lon": 0.05917
+  },
+  {
+   "name": "St George's Hospital",
+   "postcode": "SW17 0QT",
+   "lat": 51.42668,
+   "lon": -0.17569
+  },
+  {
+   "name": "Croydon University Hospital",
+   "postcode": "CR7 7YE",
+   "lat": 51.38913,
+   "lon": -0.10876
+  },
+  {
+   "name": "Kingston Hospital",
+   "postcode": "KT2 7QB",
+   "lat": 51.41483,
+   "lon": -0.2826
+  },
+  {
+   "name": "St Helier Hospital",
+   "postcode": "SM5 1AA",
+   "lat": 51.38019,
+   "lon": -0.18371
+  },
+  {
+   "name": "Darent Valley Hospital, Dartford",
+   "postcode": "DA2 8DA",
+   "lat": 51.43495,
+   "lon": 0.25867
+  },
+  {
+   "name": "Watford General Hospital",
+   "postcode": "WD18 0HB",
+   "lat": 51.64893,
+   "lon": -0.40416
+  }
+ ]
+}

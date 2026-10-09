@@ -15,6 +15,8 @@ type Postcode struct {
 	Ward     string  `json:"ward"`
 	District string  `json:"district"`
 	Region   string  `json:"region"`
+	WardCode string  `json:"-"` // ONS code, e.g. E05009375
+	Borough  string  `json:"-"` // ONS code, e.g. E09000012
 }
 
 var ErrPostcodeNotFound = errors.New("postcode not found")
@@ -38,6 +40,10 @@ func LookupPostcode(ctx context.Context, pc string) (*Postcode, error) {
 				AdminWard     string   `json:"admin_ward"`
 				AdminDistrict string   `json:"admin_district"`
 				Region        string   `json:"region"`
+				Codes         struct {
+					Ward     string `json:"admin_ward"`
+					District string `json:"admin_district"`
+				} `json:"codes"`
 			} `json:"result"`
 		}
 		err := getJSON(ctx, "https://api.postcodes.io/postcodes/"+url.PathEscape(pc), &res)
@@ -55,6 +61,7 @@ func LookupPostcode(ctx context.Context, pc string) (*Postcode, error) {
 		return &Postcode{
 			Postcode: r.Postcode, Lat: *r.Latitude, Lon: *r.Longitude,
 			Ward: r.AdminWard, District: r.AdminDistrict, Region: r.Region,
+			WardCode: r.Codes.Ward, Borough: r.Codes.District,
 		}, nil
 	})
 }

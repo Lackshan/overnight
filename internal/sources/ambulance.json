@@ -1,10 +1,14 @@
 {
   "service": "London Ambulance Service",
-  "period": "Sample figures",
-  "source": "https://www.england.nhs.uk/statistics/statistical-work-areas/ambulance-quality-indicators/",
-  "sample": true,
-  "cat1_mean_sec": 450,
-  "cat2_mean_sec": 1800,
+  "period": "September 2026",
+  "source": "https://www.england.nhs.uk/statistics/wp-content/uploads/sites/2/2026/10/AmbSYS-to-Sep-2026-as6t8.csv",
+  "live": false,
+  "cat1_mean_sec": 424,
+  "cat1_p90_sec": 726,
+  "cat2_mean_sec": 2010,
+  "cat2_p90_sec": 4230,
+  "england_cat1_mean_sec": 479,
+  "england_cat2_mean_sec": 1878,
   "cat1_target_sec": 420,
   "cat2_target_sec": 1080
 }

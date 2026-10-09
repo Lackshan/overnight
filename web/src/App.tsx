@@ -18,6 +18,7 @@ const LAYERS: { key: LayerKey; label: string; feature: string; color: string }[]
   { key: "crime", label: "Crime", feature: "map.crime", color: "#D85A30" },
   { key: "air", label: "Air", feature: "map.air", color: "#1D9E75" },
   { key: "transport", label: "Transport", feature: "map.transport", color: "#185FA5" },
+  { key: "health", label: "Health", feature: "map.health", color: "#007F3B" },
 ];
 
 function postcodeFromPath() {
@@ -46,7 +47,7 @@ export default function App() {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [live, setLive] = useState<LiveSnapshot | null>(null);
-  const [visible, setVisible] = useState<Record<LayerKey, boolean>>({ aircraft: true, overflights: true, crime: false, air: true, transport: true });
+  const [visible, setVisible] = useState<Record<LayerKey, boolean>>({ aircraft: true, overflights: true, crime: false, air: true, transport: true, health: true });
   const [auth, setAuth] = useState<{ reason: string; thenUpgrade: boolean } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
@@ -306,6 +307,11 @@ export default function App() {
         onUnlock={unlock}
         onPick={(pc) => select({ postcode: pc })}
         onNightHover={setNightHighlight}
+        onPlaceSelect={(lat, lon, key) => {
+          if (!visible.health) setVisible({ ...visible, health: true });
+          setNightHighlight(key);
+          mapRef.current?.flyTo(lat, lon);
+        }}
         onNightSelect={(o) => {
           if (!visible.transport) setVisible({ ...visible, transport: true });
           setNightHighlight(optionKey(o));

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import GettingHome from "./GettingHome";
+import MedicalCard from "./MedicalCard";
 import type { LiveSnapshot, NightOption, Point, Report, Section, Session } from "./types";
 
 interface Props {
@@ -12,6 +13,7 @@ interface Props {
   onPick: (postcode: string) => void;
   onNightHover?: (key: string | null) => void;
   onNightSelect?: (o: NightOption) => void;
+  onPlaceSelect?: (lat: number, lon: number, key: string) => void; // fly to a GP, UTC or A&E
 }
 
 const EXAMPLES = ["E1 6AN", "SW11 1AA", "TW3 3AD", "SE15 4QL", "E16 2PX"];
@@ -33,7 +35,7 @@ export function hourLabel(h: number) {
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect }: Props) {
+export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect, onPlaceSelect }: Props) {
   // "night" and "day" show the summaries; a number shows that hour (Pro).
   const [view, setView] = useState<View>("night");
 
@@ -117,6 +119,17 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
               <>
                 <h2>Getting home after midnight</h2>
                 <Locked feature="report.details" session={session} onUnlock={onUnlock} compact text="Every bus and Tube that runs after midnight, night by night" />
+              </>
+            )
+          )}
+
+          {r.medical ? (
+            <MedicalCard data={r.medical} onHover={onNightHover} onSelect={onPlaceSelect} />
+          ) : (
+            r.sections && (
+              <>
+                <h2>Medical help nearby</h2>
+                <Locked feature="report.details" session={session} onUnlock={onUnlock} compact text="GP surgeries, urgent care and A&E, with what's open now" />
               </>
             )
           )}
@@ -247,6 +260,10 @@ function valueText(s: Section, p: Point | null | undefined) {
       return `${Math.round(v)} µg/m³`;
     case "safety":
       return `~${v < 10 ? v.toFixed(1) : Math.round(v)} a month`;
+    case "emergency": {
+      const m = Math.floor(v), sec = Math.round((v - m) * 60);
+      return `fire engine ${m}m ${String(sec).padStart(2, "0")}s`;
+    }
     default:
       return "";
   }
