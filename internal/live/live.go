@@ -46,6 +46,7 @@ type Hub struct {
 	// default: they're visible and audible overhead, and public on other trackers.
 	PoliceDelay time.Duration
 	Grid        *history.Grid
+	Record      bool // add what we see to the flight history
 
 	mu        sync.RWMutex
 	tracks    map[string][]sources.Aircraft // recent positions per aircraft, oldest first
@@ -58,10 +59,11 @@ type Hub struct {
 	rec       *history.Recorder
 }
 
-func NewHub(grid *history.Grid, policeDelay time.Duration) *Hub {
+func NewHub(grid *history.Grid, policeDelay time.Duration, record bool) *Hub {
 	return &Hub{
 		PoliceDelay: policeDelay,
 		Grid:        grid,
+		Record:      record,
 		tracks:      map[string][]sources.Aircraft{},
 		lines:       map[string]sources.LineStatus{},
 		announced:   map[string]time.Time{},
@@ -115,7 +117,9 @@ func (h *Hub) pollAircraft(ctx context.Context) error {
 	defer h.mu.Unlock()
 
 	// Record into history and extend each aircraft's track.
-	h.Grid.MarkObserved(now)
+	if h.Record {
+		h.Grid.MarkObserved(now)
+	}
 	seen := map[string]bool{}
 	for _, a := range latest {
 		seen[a.Hex] = true
@@ -127,10 +131,12 @@ func (h *Hub) pollAircraft(ctx context.Context) error {
 		if n := len(tr); n > 0 {
 			dt = float64(a.T-tr[n-1].T) / 1000
 		}
-		h.rec.Add(history.Observation{
-			Hex: a.Hex, At: time.UnixMilli(a.T), Lat: a.Lat, Lon: a.Lon,
-			AltFt: a.AltFt, Kind: a.Kind, DtSec: dt,
-		})
+		if h.Record {
+			h.rec.Add(history.Observation{
+				Hex: a.Hex, At: time.UnixMilli(a.T), Lat: a.Lat, Lon: a.Lon,
+				AltFt: a.AltFt, Kind: a.Kind, DtSec: dt,
+			})
+		}
 		h.tracks[a.Hex] = append(tr, a)
 	}
 	cutoff := now.Add(-trackKeep).UnixMilli()

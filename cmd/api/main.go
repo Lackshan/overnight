@@ -31,8 +31,10 @@ func main() {
 	}
 
 	var st store.Store
+	var pg *store.Postgres
 	if url := os.Getenv("DATABASE_URL"); url != "" {
-		pg, err := store.NewPostgres(ctx, url)
+		var err error
+		pg, err = store.NewPostgres(ctx, url)
 		if err != nil {
 			log.Fatalf("database: %v", err)
 		}
@@ -55,24 +57,33 @@ func main() {
 		pro, os.Getenv(pro.StripePriceEnv), st,
 	)
 
-	// Flight history: what we've recorded live, plus the bundled backfill.
+	// Flight history. Only one server should record (RECORD_HISTORY), or the
+	// same aircraft get counted twice; every server reads the shared totals.
+	record := env("RECORD_HISTORY", "true") != "false"
 	grid := history.NewGrid()
-	if saved, err := st.GetBlob(ctx, historyKey); err != nil {
-		log.Printf("history: %v", err)
-	} else if err := grid.Merge(saved); err != nil {
-		log.Printf("history: saved snapshot: %v", err)
+	if record {
+		grid.Track()
 	}
-	if err := grid.Merge(history.Seed()); err != nil {
-		log.Printf("history: seed: %v", err)
+	var hist historyStore
+	if pg != nil {
+		hist = dbHistory{pg}
+	} else {
+		hist = fileHistory{st}
 	}
-	log.Printf("history: %d days of flight data", grid.DaysObserved())
-	go saveHistory(ctx, st, grid)
+	if err := hist.load(ctx, grid); err != nil {
+		log.Printf("history: load: %v", err)
+	}
+	log.Printf("history: %d days of flight data, recording %v", grid.DaysObserved(), map[bool]string{true: "on", false: "off (RECORD_HISTORY=false)"}[record])
+	if grid.DaysObserved() == 0 && pg != nil {
+		log.Print("history: no flight history in the database yet; run go run ./cmd/backfill -import-legacy (once) or -days ...")
+	}
+	go syncHistory(ctx, hist, grid, record)
 
 	policeDelay, err := time.ParseDuration(env("POLICE_DELAY", "0"))
 	if err != nil {
 		log.Fatalf("POLICE_DELAY: %v", err)
 	}
-	hub := live.NewHub(grid, policeDelay)
+	hub := live.NewHub(grid, policeDelay, record)
 	go hub.Run(ctx)
 
 	srv := &server.Server{
@@ -113,28 +124,89 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpSrv.Shutdown(shutdown)
-	if data, err := grid.Encode(); err == nil {
-		st.PutBlob(shutdown, historyKey, data)
+	if record {
+		if err := hist.save(shutdown, grid); err != nil {
+			log.Printf("history: save on shutdown: %v", err)
+		}
 	}
 }
 
-const historyKey = "history.json.gz"
+// historyStore is where flight history lives: Supabase tables, or a local
+// file when there's no database.
+type historyStore interface {
+	load(ctx context.Context, g *history.Grid) error
+	save(ctx context.Context, g *history.Grid) error // adds new counts
+}
 
-// saveHistory snapshots the recorded flight history every 10 minutes.
-func saveHistory(ctx context.Context, st store.Store, grid *history.Grid) {
-	t := time.NewTicker(10 * time.Minute)
+type dbHistory struct{ pg *store.Postgres }
+
+func (d dbHistory) load(ctx context.Context, g *history.Grid) error {
+	rows, seen, err := d.pg.LoadFlights(ctx)
+	if err == nil {
+		g.Replace(rows, seen)
+	}
+	return err
+}
+
+func (d dbHistory) save(ctx context.Context, g *history.Grid) error {
+	rows, seen := g.TakePending()
+	if len(rows) == 0 && len(seen) == 0 {
+		return nil
+	}
+	if err := d.pg.AddFlights(ctx, rows, seen, nil); err != nil {
+		g.RestorePending(rows, seen)
+		return err
+	}
+	return nil
+}
+
+const historyFile = "history.json.gz"
+
+type fileHistory struct{ st store.Store }
+
+// The saved file already includes the seed, so the seed is only for a first run.
+func (f fileHistory) load(ctx context.Context, g *history.Grid) error {
+	data, err := f.st.GetBlob(ctx, historyFile)
+	if err != nil {
+		return err
+	}
+	if data == nil {
+		data = history.Seed()
+	}
+	err = g.Merge(data)
+	g.TakePending() // already saved
+	return err
+}
+
+func (f fileHistory) save(ctx context.Context, g *history.Grid) error {
+	g.TakePending()
+	data, err := g.Encode()
+	if err != nil {
+		return err
+	}
+	return f.st.PutBlob(ctx, historyFile, data)
+}
+
+// syncHistory saves new counts every 5 minutes (when recording) and reloads
+// the shared totals, so servers that don't record still see new data.
+func syncHistory(ctx context.Context, h historyStore, g *history.Grid, record bool) {
+	t := time.NewTicker(5 * time.Minute)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			data, err := grid.Encode()
-			if err == nil {
-				err = st.PutBlob(ctx, historyKey, data)
+			if record {
+				if err := h.save(ctx, g); err != nil {
+					log.Printf("history: save: %v", err)
+					continue
+				}
 			}
-			if err != nil {
-				log.Printf("history: save: %v", err)
+			if _, ok := h.(dbHistory); ok {
+				if err := h.load(ctx, g); err != nil {
+					log.Printf("history: reload: %v", err)
+				}
 			}
 		}
 	}

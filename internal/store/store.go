@@ -102,6 +102,11 @@ func (p *Postgres) GetBlob(ctx context.Context, key string) ([]byte, error) {
 	return data, err
 }
 
+func (p *Postgres) DeleteBlob(ctx context.Context, key string) error {
+	_, err := p.pool.Exec(ctx, `delete from public.blobs where key = $1`, key)
+	return err
+}
+
 func (p *Postgres) PutBlob(ctx context.Context, key string, data []byte) error {
 	_, err := p.pool.Exec(ctx, `
 		insert into public.blobs (key, data, updated_at) values ($1, $2, now())

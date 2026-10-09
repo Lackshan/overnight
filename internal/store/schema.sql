@@ -38,3 +38,29 @@ alter table public.recent_searches enable row level security;
 drop policy if exists "Users can read their own recent searches" on public.recent_searches;
 create policy "Users can read their own recent searches" on public.recent_searches
   for select using ((select auth.uid()) = user_id);
+
+-- Flight history: totals per ~1 km grid cell, day of the week (Monday = 0)
+-- and local hour. Servers only ever add to these, so several can share them.
+create table if not exists public.flight_counts (
+  cell integer not null,
+  dow smallint not null check (dow between 0 and 6),
+  hour smallint not null check (hour between 0 and 23),
+  passes double precision not null default 0,
+  low double precision not null default 0,
+  helis double precision not null default 0,
+  police_sec double precision not null default 0,
+  amb_sec double precision not null default 0,
+  primary key (cell, dow, hour)
+);
+-- Local date-hours with data ('2026-10-08T03'), so quiet hours count as zero.
+create table if not exists public.flight_hours (
+  date_hour text primary key
+);
+-- adsb.lol archive days already imported by cmd/backfill.
+create table if not exists public.flight_backfills (
+  day date primary key,
+  added_at timestamptz not null default now()
+);
+alter table public.flight_counts enable row level security;
+alter table public.flight_hours enable row level security;
+alter table public.flight_backfills enable row level security;

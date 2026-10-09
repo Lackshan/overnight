@@ -24,10 +24,18 @@ Scores are heuristics in `internal/report/report.go`.
 
 ## Flight history
 
-`internal/history` keeps a ~1 km grid over London with counts per hour of day.
+Totals per ~1 km grid cell, day of the week and local hour, in three Supabase tables (created on startup from `internal/store/schema.sql`):
 
-- `go run ./cmd/backfill -days 2026-10-07,2026-10-08` streams adsb.lol's daily archive (~4 GB a day, nothing stored but the result) and writes `internal/history/seed.json.gz`, which is embedded in the binary. Each day takes about 10 minutes. More days means steadier averages.
-- The running server records every position it sees and saves the grid every 10 minutes (to Supabase if `DATABASE_URL` is set, otherwise `./data`).
+| Table | Holds |
+|---|---|
+| `flight_counts` | Aircraft passing, low passes, helicopters, police and air ambulance seconds, per cell × day of week × hour |
+| `flight_hours` | Which local date-hours have data, so quiet hours count as zero rather than missing |
+| `flight_backfills` | Archive days already imported, so none is imported twice |
+
+- The server loads the totals into memory at startup and reloads them every 5 minutes, so pages stay instant.
+- **Only one server records.** It adds its new counts every 5 minutes as "add these to the totals", never overwriting. Set `RECORD_HISTORY=false` everywhere else (for example on your laptop when the hosted app is running), or the same aircraft get counted twice.
+- Backfill more archive days straight into the database: `go run ./cmd/backfill -days 2026-10-06,2026-10-07` (about 4 GB and 10 minutes a day; hours a live server already recorded are skipped).
+- Without `DATABASE_URL`, the bundled `internal/history/seed.json.gz` is used and recordings go to `./data`. `go run ./cmd/backfill -file -days ...` rebuilds the seed.
 
 ## Refreshing the fire data
 

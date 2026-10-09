@@ -1,9 +1,19 @@
 // Command backfill streams adsb.lol's daily archives (about 4 GB per day),
-// keeps only aircraft below 10,000 ft over London, and writes the hourly grid
-// to internal/history/seed.json.gz, which gets embedded in the API binary.
-// Nothing is saved to disk except the small result.
+// keeps only aircraft below 10,000 ft over London, and adds them to the
+// flight history. Nothing large is saved to disk.
 //
-//	go run ./cmd/backfill -days 2026-10-07,2026-10-08
+// With DATABASE_URL set it writes to Supabase. Each day is imported at most
+// once, and hours a live server already recorded are skipped:
+//
+//	go run ./cmd/backfill -days 2026-10-06,2026-10-07
+//
+// Once, to move history saved by older versions (a single stored file) into
+// the tables:
+//
+//	go run ./cmd/backfill -import-legacy
+//
+// Without a database, or with -file, it writes internal/history/seed.json.gz,
+// which is bundled into the binary for running without a database.
 package main
 
 import (
@@ -11,6 +21,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,23 +37,52 @@ import (
 
 	"overnight/internal/history"
 	"overnight/internal/sources"
+	"overnight/internal/store"
 )
 
 func main() {
 	days := flag.String("days", "", "comma-separated UTC dates, e.g. 2026-10-07,2026-10-08")
-	out := flag.String("out", "internal/history/seed.json.gz", "output file")
-	merge := flag.Bool("merge", true, "add to the existing output instead of replacing it")
+	importLegacy := flag.Bool("import-legacy", false, "move history saved by older versions into the database tables")
+	toFile := flag.Bool("file", false, "write the seed file even if DATABASE_URL is set")
+	out := flag.String("out", "internal/history/seed.json.gz", "seed file (file mode)")
 	flag.Parse()
-	if *days == "" {
-		log.Fatal("pass -days")
+	if *days == "" && !*importLegacy {
+		log.Fatal("pass -days or -import-legacy")
+	}
+	ctx := context.Background()
+	if url := os.Getenv("DATABASE_URL"); url != "" && !*toFile {
+		pg, err := store.NewPostgres(ctx, url)
+		if err != nil {
+			log.Fatalf("database: %v", err)
+		}
+		if *importLegacy {
+			if err := importLegacyHistory(ctx, pg); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if *days != "" {
+			done, err := pg.BackfilledDays(ctx)
+			if err != nil {
+				log.Fatal(err)
+			}
+			for _, day := range strings.Split(*days, ",") {
+				day = strings.TrimSpace(day)
+				if done[day] {
+					log.Printf("%s: already imported, skipping", day)
+					continue
+				}
+				if err := backfillToDB(ctx, pg, day); err != nil {
+					log.Fatalf("%s: %v", day, err)
+				}
+			}
+		}
+		return
 	}
 
 	g := history.NewGrid()
-	if *merge {
-		if old, err := os.ReadFile(*out); err == nil {
-			if err := g.Merge(old); err != nil {
-				log.Fatalf("existing %s: %v", *out, err)
-			}
+	if old, err := os.ReadFile(*out); err == nil {
+		if err := g.Merge(old); err != nil {
+			log.Fatalf("existing %s: %v", *out, err)
 		}
 	}
 	for _, day := range strings.Split(*days, ",") {
@@ -58,6 +98,71 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("wrote %s (%d KB, %d days)", *out, len(data)/1024, g.DaysObserved())
+}
+
+// backfillToDB imports one day, skipping hours a live server already recorded.
+func backfillToDB(ctx context.Context, pg *store.Postgres, day string) error {
+	start, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return err
+	}
+	existing, err := pg.FlightHours(ctx)
+	if err != nil {
+		return err
+	}
+	g := history.NewGrid()
+	g.Skip(existing)
+	if err := backfillDay(g, day); err != nil {
+		return err
+	}
+	rows, seen := g.Rows()
+	if err := pg.AddFlights(ctx, rows, seen, &start); err != nil {
+		return err
+	}
+	log.Printf("%s: added %d totals and %d hours to the database", day, len(rows), len(seen))
+	return nil
+}
+
+const legacyKey = "history.json.gz"
+
+// legacySeedDay is the archive day the bundled seed was built from.
+const legacySeedDay = "2026-10-08"
+
+// importLegacyHistory moves the single stored history file used by older
+// versions (which already includes the bundled seed) into the tables, then
+// deletes it. Falls back to the bundled seed if there's no stored file.
+func importLegacyHistory(ctx context.Context, pg *store.Postgres) error {
+	existing, err := pg.FlightHours(ctx)
+	if err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		return fmt.Errorf("the flight tables already have %d hours of data; refusing to import over them", len(existing))
+	}
+	data, err := pg.GetBlob(ctx, legacyKey)
+	if err != nil {
+		return err
+	}
+	source := "stored history file"
+	if data == nil {
+		data, source = history.Seed(), "bundled seed"
+	}
+	rows, seen, err := history.Decode(data)
+	if err != nil {
+		return fmt.Errorf("%s: %w", source, err)
+	}
+	day, _ := time.Parse(time.DateOnly, legacySeedDay)
+	if err := pg.AddFlights(ctx, rows, seen, &day); err != nil {
+		return err
+	}
+	log.Printf("imported the %s: %d totals, %d hours", source, len(rows), len(seen))
+	if source == "stored history file" {
+		if err := pg.DeleteBlob(ctx, legacyKey); err != nil {
+			return fmt.Errorf("imported, but couldn't delete the old file: %w", err)
+		}
+		log.Print("deleted the old stored history file")
+	}
+	return nil
 }
 
 func backfillDay(g *history.Grid, day string) error {
