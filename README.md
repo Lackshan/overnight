@@ -13,7 +13,7 @@
 | Section | Source | How |
 |---|---|---|
 | Planes overhead | adsb.lol ADS-B | **Measured.** Distinct aircraft below 10,000 ft within ~1.5 km, by hour, from archived days plus everything recorded live |
-| Helicopters | adsb.lol ADS-B | **Measured.** Minutes police (NPAS) and air ambulance helicopters spend overhead, by hour |
+| Helicopters | adsb.lol ADS-B and MLAT | **Measured.** Minutes police (NPAS) and air ambulance helicopters spend overhead, by hour |
 | Getting home | TfL Unified API | Night buses within 500 m, Night Tube lines (Fri and Sat), stations by day |
 | Air | London Air Quality Network | **Measured.** Nearest monitor's average for each hour over the last 14 days |
 | Safety after dark | data.police.uk | **Estimated** by hour: the police publish no times, so each crime is spread over the hours its type usually happens |
@@ -30,9 +30,9 @@ Scores are heuristics in `internal/report/report.go`.
 
 ## Live aircraft
 
-The server polls adsb.lol for all of London (every 5 s, backing off when rate-limited) and the browser polls the server every 2 s. `web/src/motion.ts` draws each aircraft a few seconds in the past, where its next position is already known, along a curve that respects speed and heading at both ends. The delay grows and shrinks with the gap between updates, and any correction fades in rather than snapping. `npm --prefix web test` simulates noisy, rate-limited data and fails if anything jumps, stalls or snaps round.
+The server polls adsb.lol for everything within 40 nautical miles of London (every 5 s, backing off when rate-limited) and the browser polls the server every 2 s for whatever is in view. `web/src/motion.ts` draws each aircraft a few seconds in the past, where its next position is already known, along a curve that respects speed and heading at both ends. The delay grows and shrinks with the gap between updates, and any correction fades in rather than snapping. `npm --prefix web test` simulates noisy, rate-limited data and fails if anything jumps, stalls or snaps round.
 
-**Police delay:** police helicopter positions are held back by `POLICE_DELAY` (default 10 minutes) so the app can't be used to follow or evade an operation in progress.
+**Police helicopters** are shown live, like other public trackers. `POLICE_DELAY` (e.g. `2m`) can hold their positions back if you want.
 
 **Rate limits:** adsb.lol's free API rate-limits busy users. For production, feed them data (feeders get higher limits) or ask them about access.
 

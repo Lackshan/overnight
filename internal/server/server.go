@@ -151,7 +151,21 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 	if l := r.URL.Query().Get("lines"); l != "" {
 		lines = strings.Split(l, ",")
 	}
-	snap := s.Hub.Query(lat, lon, 25, 5, lines, s.Features.Limit(plan, config.LimitFeedItems))
+	// bbox=west,south,east,north: the browser's visible map area.
+	var box *live.Box
+	if parts := strings.Split(r.URL.Query().Get("bbox"), ","); len(parts) == 4 {
+		var v [4]float64
+		ok := true
+		for i, p := range parts {
+			f, err := strconv.ParseFloat(p, 64)
+			ok = ok && err == nil
+			v[i] = f
+		}
+		if ok && v[0] < v[2] && v[1] < v[3] {
+			box = &live.Box{West: v[0], South: v[1], East: v[2], North: v[3]}
+		}
+	}
+	snap := s.Hub.Query(lat, lon, 25, box, 5, lines, s.Features.Limit(plan, config.LimitFeedItems))
 	locked := []string{}
 	if !s.Features.Can(plan, config.MapAircraft) {
 		snap.Aircraft = nil

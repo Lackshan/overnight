@@ -19,7 +19,7 @@ import (
 
 const (
 	londonLat, londonLon = 51.5072, -0.1276
-	londonRadiusNM       = 30
+	londonRadiusNM       = 40 // ~74 km: Greater London plus the approaches
 	// adsb.lol rate-limits; poll as fast as it allows, backing off on 429s.
 	aircraftMin   = 4 * time.Second
 	aircraftMax   = 30 * time.Second
@@ -42,8 +42,8 @@ type Event struct {
 }
 
 type Hub struct {
-	// PoliceDelay holds back police helicopter positions so the app can't be
-	// used to follow or evade an operation in progress.
+	// PoliceDelay optionally holds back police helicopter positions. Off by
+	// default: they're visible and audible overhead, and public on other trackers.
 	PoliceDelay time.Duration
 	Grid        *history.Grid
 
@@ -161,7 +161,7 @@ func (h *Hub) pollAircraft(ctx context.Context) error {
 		// Latest position at or before the delay cut-off, if still fresh.
 		for i := len(tr) - 1; i >= 0; i-- {
 			if tr[i].T <= delayed {
-				if delayed-tr[i].T < 30_000 {
+				if delayed-tr[i].T < 60_000 { // MLAT positions can be sparse
 					p := tr[i]
 					p.T += h.PoliceDelay.Milliseconds() // so the browser animates it in step
 					h.visible = append(h.visible, p)
@@ -250,20 +250,37 @@ type Snapshot struct {
 	Lines    []sources.LineStatus `json:"lines,omitempty"` // status of lines serving the area
 }
 
-// Query returns aircraft within aircraftKM, events within eventKM or on any
-// of lines, and those lines' current status.
-func (h *Hub) Query(lat, lon, aircraftKM, eventKM float64, lines []string, maxEvents int) Snapshot {
+// Box is a map viewport: south-west and north-east corners.
+type Box struct{ South, West, North, East float64 }
+
+func (b *Box) contains(lat, lon float64) bool {
+	return lat >= b.South && lat <= b.North && lon >= b.West && lon <= b.East
+}
+
+const maxAircraft = 500
+
+// Query returns aircraft inside box (or within aircraftKM of the point when
+// box is nil), events within eventKM or on any of lines, and those lines'
+// current status.
+func (h *Hub) Query(lat, lon, aircraftKM float64, box *Box, eventKM float64, lines []string, maxEvents int) Snapshot {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	s := Snapshot{Now: time.Now().UnixMilli(), Updated: h.acUpdated}
 	for _, a := range h.visible {
 		d := DistanceM(lat, lon, a.Lat, a.Lon)
-		if d <= aircraftKM*1000 {
+		if (box != nil && box.contains(a.Lat, a.Lon)) || (box == nil && d <= aircraftKM*1000) {
 			s.Aircraft = append(s.Aircraft, a)
 		}
 		if d <= 5000 && a.AltFt > 0 {
 			s.Nearby++
 		}
+	}
+	if len(s.Aircraft) > maxAircraft {
+		// Zoomed right out: keep the ones nearest the middle of the view.
+		sort.Slice(s.Aircraft, func(i, j int) bool {
+			return DistanceM(lat, lon, s.Aircraft[i].Lat, s.Aircraft[i].Lon) < DistanceM(lat, lon, s.Aircraft[j].Lat, s.Aircraft[j].Lon)
+		})
+		s.Aircraft = s.Aircraft[:maxAircraft]
 	}
 	want := map[string]bool{}
 	for _, id := range lines {

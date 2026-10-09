@@ -43,9 +43,10 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   session: () => call<Session>("/api/session"),
   report: (postcode: string) => call<Report>(`/api/report/${encodeURIComponent(postcode.replace(/\s/g, ""))}`),
-  live: (lat: number, lon: number, lines: string[]) =>
+  // bbox is the visible map area as [west, south, east, north].
+  live: (lat: number, lon: number, lines: string[], bbox?: [number, number, number, number]) =>
     call<{ snapshot: LiveSnapshot; locked: string[] }>(
-      `/api/live?lat=${lat}&lon=${lon}&lines=${encodeURIComponent(lines.join(","))}`,
+      `/api/live?lat=${lat}&lon=${lon}&lines=${encodeURIComponent(lines.join(","))}${bbox ? `&bbox=${bbox.map((v) => v.toFixed(3)).join(",")}` : ""}`,
     ),
   checkout: (returnPath: string) =>
     call<{ url: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ return_path: returnPath }) }),

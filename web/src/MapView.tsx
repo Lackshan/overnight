@@ -18,6 +18,8 @@ interface Props {
   live: { aircraft: Aircraft[]; now: number } | null;
   visible: Record<LayerKey, boolean>;
   dark: boolean;
+  // Called with the visible area (padded) whenever the map moves.
+  onBounds?: (bbox: [number, number, number, number]) => void;
 }
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
@@ -68,13 +70,13 @@ const layerIds: Record<Exclude<LayerKey, "aircraft">, string[]> = {
   transport: ["stations"],
 };
 
-export default function MapView({ target, report, live, visible, dark }: Props) {
+export default function MapView({ target, report, live, visible, dark, onBounds }: Props) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const planes = useRef<AircraftLayer | null>(null);
   const pin = useRef<Marker | null>(null);
-  const latest = useRef({ report, visible, live });
-  latest.current = { report, visible, live };
+  const latest = useRef({ report, visible, live, onBounds });
+  latest.current = { report, visible, live, onBounds };
 
   // Create the map once and never re-create it.
   useEffect(() => {
@@ -141,6 +143,7 @@ export default function MapView({ target, report, live, visible, dark }: Props) 
 
       // Aircraft go on top of everything.
       planes.current = new AircraftLayer(m);
+      if (new URLSearchParams(location.search).has("debug")) Object.assign(window, { overnightPlanes: planes.current });
 
       const popup = new Popup({ closeButton: false, offset: 10, maxWidth: "240px" });
       const show = (html: (p: Record<string, string>) => string) => (e: MapLayerMouseEvent) => {
@@ -161,6 +164,16 @@ export default function MapView({ target, report, live, visible, dark }: Props) 
       planes.current.setVisible(visible.aircraft);
       if (live) planes.current.ingest(live.aircraft, live.now);
     });
+
+    // Report the visible area, padded so aircraft are already loaded before
+    // they fly into view.
+    const reportBounds = () => {
+      const b = m.getBounds();
+      const padX = (b.getEast() - b.getWest()) * 0.25, padY = (b.getNorth() - b.getSouth()) * 0.25;
+      latest.current.onBounds?.([b.getWest() - padX, b.getSouth() - padY, b.getEast() + padX, b.getNorth() + padY]);
+    };
+    m.on("moveend", reportBounds);
+    m.once("load", reportBounds);
 
     let raf = 0;
     const tick = () => {

@@ -49,6 +49,8 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const upgradeAfterSignIn = useRef(false);
+  // The visible map area; read by the live poll without restarting it.
+  const bounds = useRef<[number, number, number, number] | undefined>(undefined);
 
   const plan = session?.plan ?? "anonymous";
 
@@ -141,7 +143,7 @@ export default function App() {
     let alive = true;
     const poll = () =>
       api
-        .live(focus.lat, focus.lon, lines)
+        .live(focus.lat, focus.lon, lines, bounds.current)
         .then((r) => alive && setLive(r.snapshot))
         .catch(() => {});
     poll();
@@ -219,6 +221,7 @@ export default function App() {
         live={live && aircraftAllowed ? { aircraft: live.aircraft ?? [], now: live.now } : null}
         visible={visible}
         dark={dark}
+        onBounds={(b) => (bounds.current = b)}
       />
 
       <div className="top-left">

@@ -78,9 +78,7 @@ export class AircraftLayer {
       const hex = e.features?.[0]?.properties?.hex as string | undefined;
       const tr = hex && this.motion.tracks.get(hex);
       if (!tr) return;
-      this.selected = hex;
-      this.renderPopup(tr, true);
-      this.popup.setLngLat(toLngLat(tr.x, tr.y)).addTo(map);
+      this.select(hex);
     });
     this.assertLayers();
     map.on("mouseenter", "ac-icons", () => (map.getCanvas().style.cursor = "pointer"));
@@ -189,6 +187,22 @@ export class AircraftLayer {
         if (now - this.popupAt > 250) this.renderPopup(tr, false);
       }
     }
+  }
+
+  // Open the popup on an aircraft and keep it there. addTo() closes the popup
+  // first if it's already open (firing "close", which clears the selection),
+  // so the selection is set only after it's on the map.
+  select(hex: string) {
+    const tr = this.motion.tracks.get(hex);
+    if (!tr) return;
+    this.renderPopup(tr, true);
+    this.popup.setLngLat(toLngLat(tr.x, tr.y)).addTo(this.map);
+    this.selected = hex;
+  }
+
+  // For debugging: which aircraft the popup is on, and where it is.
+  debugState() {
+    return { selected: this.selected, popupAt: this.popup.isOpen() ? this.popup.getLngLat() : null, tracks: this.motion.tracks.size };
   }
 
   private renderPopup(tr: Track, full: boolean) {

@@ -68,7 +68,7 @@ func main() {
 	log.Printf("history: %d days of flight data", grid.DaysObserved())
 	go saveHistory(ctx, st, grid)
 
-	policeDelay, err := time.ParseDuration(env("POLICE_DELAY", "10m"))
+	policeDelay, err := time.ParseDuration(env("POLICE_DELAY", "0"))
 	if err != nil {
 		log.Fatalf("POLICE_DELAY: %v", err)
 	}
