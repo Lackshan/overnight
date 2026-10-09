@@ -1,0 +1,10 @@
+{
+  "service": "London Ambulance Service",
+  "period": "Sample figures",
+  "source": "https://www.england.nhs.uk/statistics/statistical-work-areas/ambulance-quality-indicators/",
+  "sample": true,
+  "cat1_mean_sec": 450,
+  "cat2_mean_sec": 1800,
+  "cat1_target_sec": 420,
+  "cat2_target_sec": 1080
+}

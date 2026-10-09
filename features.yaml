@@ -1,0 +1,73 @@
+# Overnight: who can see what.
+#
+# Every gated part of the app has a key under `features`. `plans` lists the
+# plans that can see it. There are three plans:
+#   anonymous  not signed in
+#   free       signed in, not paying
+#   pro        paying
+#
+# The API strips anything the caller's plan can't see, so this file is the
+# single source of truth. The UI reads GET /api/session to know what to show
+# as locked and whether the next step is "Sign up" or "Go Pro".
+# Restart the server after editing. Unknown keys or plans fail at startup.
+
+plans:
+  anonymous:
+    name: Guest
+  free:
+    name: Free
+  pro:
+    name: Pro
+    price_label: "£4.99 / month"
+    checkout_mode: subscription # "subscription" or "payment" (one-off)
+    stripe_price_env: STRIPE_PRICE_PRO # env var holding the Stripe price ID
+
+# Cheapest to most expensive. Used to work out the next plan to upsell.
+upgrade_order: [anonymous, free, pro]
+
+features:
+  report.score:
+    label: Night and day scores
+    plans: [anonymous, free, pro]
+  report.sections:
+    label: Section scores for night and day
+    plans: [anonymous, free, pro]
+  report.details:
+    label: Section details
+    plans: [free, pro]
+  report.timeline:
+    label: Every hour of the night
+    plans: [pro]
+  safety.breakdown:
+    label: Crime by category
+    plans: [pro]
+  map.aircraft:
+    label: Live aircraft
+    plans: [anonymous, free, pro]
+  map.overflights:
+    label: Night flight paths
+    plans: [free, pro]
+  map.crime:
+    label: Crime map layer
+    plans: [anonymous, free, pro]
+  map.air:
+    label: Air quality map layer
+    plans: [anonymous, free, pro]
+  map.transport:
+    label: Stations map layer
+    plans: [anonymous, free, pro]
+  live.feed:
+    label: Happening nearby
+    plans: [free, pro]
+
+# Numeric limits per plan. 0 means unlimited. A plan missing from a limit
+# gets 0 (unlimited), so list every plan you want to cap.
+limits:
+  report.lookups_per_day:
+    anonymous: 10
+    free: 30
+    pro: 0
+  live.feed_items:
+    anonymous: 0
+    free: 3
+    pro: 20
