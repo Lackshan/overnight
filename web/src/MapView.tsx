@@ -35,6 +35,7 @@ interface Props {
   onBounds?: (bbox: [number, number, number, number]) => void;
   flightPaths: FlightPaths | null;
   nightHighlight: string | null; // optionKey of the night service hovered in the panel
+  comparePins?: { lat: number; lon: number; label: string; color: string; postcode: string }[];
 }
 
 export interface MapHandle {
@@ -105,7 +106,7 @@ const layerIds: Record<Exclude<LayerKey, "aircraft">, string[]> = {
   health: [], // DOM markers, toggled separately
 };
 
-const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, live, visible, dark, onBounds, flightPaths, nightHighlight }, ref) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, live, visible, dark, onBounds, flightPaths, nightHighlight, comparePins = [] }, ref) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const planes = useRef<AircraftLayer | null>(null);
@@ -281,6 +282,40 @@ const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, 
     applyFlightPaths(map.current, flightPaths);
     applyFlightHour();
   }, [flightPaths]);
+
+  // Comparison: a lettered pin per postcode, and the map fitted to show them all.
+  const pins = useRef<Marker[]>([]);
+  const pinKey = comparePins.map((p) => p.postcode).join(",");
+  useEffect(() => {
+    const m = map.current;
+    for (const p of pins.current) p.remove();
+    pins.current = [];
+    if (!m || comparePins.length === 0) {
+      if (pin.current && target) pin.current.addTo(m!);
+      return;
+    }
+    pin.current?.remove();
+    for (const p of comparePins) {
+      // MapLibre owns the outer element's transform, so the pin shape is inside.
+      const el = document.createElement("div");
+      el.title = p.postcode;
+      const shape = document.createElement("div");
+      shape.className = "cmp-pin";
+      shape.style.background = p.color;
+      const letter = document.createElement("span");
+      letter.textContent = p.label;
+      shape.appendChild(letter);
+      el.appendChild(shape);
+      pins.current.push(new Marker({ element: el, anchor: "bottom" }).setLngLat([p.lon, p.lat]).addTo(m));
+    }
+    const lons = comparePins.map((p) => p.lon), lats = comparePins.map((p) => p.lat);
+    const wide = window.innerWidth > 760;
+    m.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], {
+      padding: wide ? { top: 90, bottom: 90, left: 90, right: Math.min(660, window.innerWidth * 0.55) + 40 } : { top: 150, bottom: window.innerHeight * 0.62 + 24, left: 40, right: 40 },
+      maxZoom: 13,
+      duration: 900,
+    });
+  }, [pinKey]);
 
   // Night bus stops and Night Tube stations, marked with the same badges as
   // the panel. Routes sharing a stop share one marker; click for details.

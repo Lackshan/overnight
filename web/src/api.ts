@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { CompareItem } from "./compare";
 import type { RecentSearch } from "./recent";
 import type { FlightPaths, LiveSnapshot, Report, Session } from "./types";
 
@@ -50,6 +51,7 @@ export const api = {
       `/api/live?lat=${lat}&lon=${lon}&lines=${encodeURIComponent(lines.join(","))}${bbox ? `&bbox=${bbox.map((v) => v.toFixed(3)).join(",")}` : ""}`,
     ),
   flightPaths: () => call<FlightPaths>("/api/flightpaths"),
+  compare: (postcodes: string[]) => call<{ items: CompareItem[] }>(`/api/compare?pc=${postcodes.map((p) => encodeURIComponent(p.replace(/\s/g, ""))).join(",")}`),
   recent: () => call<{ recent: RecentSearch[] }>("/api/recent"),
   addRecent: (body: RecentSearch | { items: RecentSearch[] }) => call<{ recent: RecentSearch[] }>("/api/recent", { method: "POST", body: JSON.stringify(body) }),
   removeRecent: (postcode: string | null) =>

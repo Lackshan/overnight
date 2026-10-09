@@ -41,6 +41,7 @@ type Report struct {
 	Breakdown   []CategoryCount   `json:"breakdown,omitempty"`
 	GettingHome *GettingHome      `json:"getting_home,omitempty"`
 	Medical     *Medical          `json:"medical,omitempty"`
+	Facts       []Fact            `json:"-"` // served by /api/compare only
 	Layers      Layers            `json:"layers"`
 	Lines       []string          `json:"lines"` // TfL line IDs serving the area, for the live feed
 	Locked      []string          `json:"locked"`
@@ -187,6 +188,7 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 	r.Breakdown = breakdown(crimes)
 	r.GettingHome = gh
 	r.Medical = med
+	r.Facts = facts(p, prof, gh, airHist, crimes, med, r.HistoryDays)
 
 	// Overall score per hour, weighted across sections that have data.
 	weights := map[string]float64{"aircraft": .25, "helicopters": .1, "getting_home": .2, "air": .15, "safety": .2, "emergency": .1, "medical": .1}

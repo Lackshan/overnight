@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -58,6 +59,7 @@ func (s *Server) Routes() http.Handler {
 		r.Get("/api/report/{postcode}", s.report)
 		r.Get("/api/live", s.live)
 		r.Get("/api/flightpaths", s.flightPaths)
+		r.Get("/api/compare", s.compare)
 		r.Get("/api/recent", s.requireUser(s.recent))
 		r.Post("/api/recent", s.requireUser(s.addRecent))
 		r.Delete("/api/recent", s.requireUser(s.deleteRecent))
@@ -269,6 +271,83 @@ func (s *Server) deleteRecent(w http.ResponseWriter, r *http.Request, u *auth.Us
 		return
 	}
 	s.recent(w, r, u)
+}
+
+// CompareItem is one postcode's column in a comparison.
+type CompareItem struct {
+	Postcode string            `json:"postcode"`
+	Error    string            `json:"error,omitempty"`
+	Place    *sources.Postcode `json:"place,omitempty"`
+	Night    *report.Score     `json:"night,omitempty"`
+	Day      *report.Score     `json:"day,omitempty"`
+	Hourly   []int             `json:"hourly,omitempty"`
+	Sections []CompareSection  `json:"sections,omitempty"`
+	Facts    []report.Fact     `json:"facts,omitempty"`
+}
+
+type CompareSection struct {
+	ID       string `json:"id"`
+	Label    string `json:"label"`
+	Night    *int   `json:"night"`
+	Day      *int   `json:"day"`
+	Headline string `json:"headline"`
+	Measured bool   `json:"measured"`
+}
+
+// compare builds 2 or more postcodes' reports side by side (supporters only).
+// GET /api/compare?pc=E16AN&pc=SW111AA (or pc=E16AN,SW111AA)
+func (s *Server) compare(w http.ResponseWriter, r *http.Request) {
+	plan := s.plan(r)
+	if !s.Features.Can(plan, config.Compare) {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":      "Comparisons are for supporters.",
+			"unlocks_on": s.Features.NextPlan(plan, config.Compare),
+		})
+		return
+	}
+	var pcs []string
+	seen := map[string]bool{}
+	for _, v := range r.URL.Query()["pc"] {
+		for _, pc := range strings.Split(v, ",") {
+			if pc = sources.NormalisePostcode(pc); pc != "" && !seen[pc] {
+				seen[pc] = true
+				pcs = append(pcs, pc)
+			}
+		}
+	}
+	limit := s.Features.Limit(plan, config.LimitCompare)
+	// One is allowed so the app can fill each column as soon as it's ready.
+	if len(pcs) == 0 || (limit > 0 && len(pcs) > limit) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("Compare up to %d postcodes.", limit))
+		return
+	}
+	items := make([]CompareItem, len(pcs))
+	var wg sync.WaitGroup
+	for i, pc := range pcs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			items[i] = CompareItem{Postcode: pc}
+			rep, err := s.Reports.Build(r.Context(), pc)
+			if errors.Is(err, sources.ErrPostcodeNotFound) {
+				items[i].Error = "We couldn't find that postcode."
+				return
+			}
+			if err != nil {
+				items[i].Error = "Couldn't reach the data sources."
+				return
+			}
+			g := report.Gate(rep, plan, s.Features)
+			it := CompareItem{Postcode: g.Place.Postcode, Place: g.Place, Night: g.Night, Day: g.Day, Hourly: g.Hourly, Facts: rep.Facts}
+			for _, sec := range g.Sections {
+				it.Sections = append(it.Sections, CompareSection{ID: sec.ID, Label: sec.Label, Night: sec.Night, Day: sec.Day, Headline: sec.Headline, Measured: sec.Measured})
+			}
+			items[i] = it
+		}()
+	}
+	wg.Wait()
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
 func (s *Server) requireUser(h func(http.ResponseWriter, *http.Request, *auth.User)) http.HandlerFunc {

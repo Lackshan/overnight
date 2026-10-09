@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, clearReports, loadReport, setDevPlan, setToken, supabase } from "./api";
 import AuthModal from "./AuthModal";
+import { COMPARE_LETTERS, compareColor, formatPostcode, loadCompare, samePostcode, saveCompare, type CompareItem } from "./compare";
+import CompareView from "./CompareView";
 import FlightSlider from "./FlightSlider";
 import { optionKey } from "./nightBadges";
 import { addLocal, localRecents, removeLocal, syncOnSignIn, type RecentSearch } from "./recent";
@@ -21,6 +23,14 @@ const LAYERS: { key: LayerKey; label: string; feature: string; color: string }[]
   { key: "transport", label: "Transport", feature: "map.transport", color: "#185FA5" },
   { key: "health", label: "Health", feature: "map.health", color: "#007F3B" },
 ];
+
+const isComparePath = () => location.pathname.startsWith("/compare");
+
+// /compare?pc=E16AN,SW111AA, falling back to the list saved in this browser.
+function compareFromURL(): string[] {
+  const pc = new URLSearchParams(location.search).get("pc");
+  return pc ? pc.split(",").map((p) => p.trim()).filter(Boolean).map(formatPostcode).slice(0, 4) : loadCompare();
+}
 
 function postcodeFromPath() {
   const m = location.pathname.match(/^\/p\/([A-Za-z0-9]+)/);
@@ -59,6 +69,9 @@ export default function App() {
   const [flightPaths, setFlightPaths] = useState<FlightPaths | null>(null);
   const [nightHighlight, setNightHighlight] = useState<string | null>(null);
   const [recents, setRecents] = useState<RecentSearch[]>([]);
+  const [compareList, setCompareList] = useState<string[]>(() => (isComparePath() ? compareFromURL() : loadCompare()));
+  const [compareOpen, setCompareOpen] = useState(isComparePath);
+  const [compareItems, setCompareItems] = useState<CompareItem[]>([]);
 
   const plan = session?.plan ?? "anonymous";
 
@@ -115,7 +128,7 @@ export default function App() {
       const s = await api.confirm(id);
       clearReports();
       setSession(s);
-      flash("Thanks for supporting Overnight. Comparisons are coming soon.");
+      flash("Thanks for supporting Overnight. You can now compare postcodes: use + Compare on any report.");
     } catch (e) {
       flash(e instanceof Error ? e.message : "Couldn't confirm your payment yet. Refresh in a moment.");
     }
@@ -198,9 +211,39 @@ export default function App() {
     api.flightPaths().then(setFlightPaths).catch(() => {});
   }, [pathsAllowed]);
 
-  // Back/forward between postcodes.
+  // Keep the comparison list saved, and in the address bar while it's open.
+  useEffect(() => {
+    saveCompare(compareList);
+    if (compareOpen) history.replaceState(null, "", compareList.length ? `/compare?pc=${compareList.map((p) => p.replace(/\s/g, "")).join(",")}` : "/compare");
+  }, [compareList.join(","), compareOpen]);
+
+  const compareMax = session?.limits["compare.postcodes"] || 4;
+  const canCompare = session?.features["compare"]?.allowed ?? false;
+  const addToCompare = (raw: string) => {
+    if (!canCompare) return unlock("compare");
+    const pc = formatPostcode(raw);
+    setCompareList((list) => (list.some((p) => samePostcode(p, pc)) || list.length >= compareMax ? list : [...list, pc]));
+  };
+  const openCompare = () => {
+    setCompareOpen(true);
+    history.pushState(null, "", "/compare");
+  };
+  const closeCompare = () => {
+    setCompareOpen(false);
+    setCompareItems([]);
+    history.pushState(null, "", report ? `/p/${report.place.postcode.replace(/\s/g, "")}` : "/");
+  };
+
+  // Back/forward between postcodes and the comparison.
   useEffect(() => {
     const onPop = () => {
+      if (isComparePath()) {
+        setCompareOpen(true);
+        setCompareList(compareFromURL());
+        return;
+      }
+      setCompareOpen(false);
+      setCompareItems([]);
       const pc = postcodeFromPath();
       setReport(null);
       setTarget(pc ? { postcode: pc } : null);
@@ -211,7 +254,9 @@ export default function App() {
 
   const select = (t: Target) => {
     const pc = t.postcode.replace(/\s/g, "").toUpperCase();
-    if (pc === report?.place.postcode.replace(/\s/g, "")) return;
+    setCompareOpen(false);
+    setCompareItems([]);
+    if (pc === report?.place.postcode.replace(/\s/g, "")) return history.pushState(null, "", `/p/${pc}`);
     setReport(null);
     setTarget(t);
     history.pushState(null, "", `/p/${pc}`);
@@ -248,11 +293,12 @@ export default function App() {
   const aircraftAllowed = session?.features["map.aircraft"]?.allowed ?? false;
 
   return (
-    <div className="app">
+    <div className={compareOpen ? "app comparing" : "app"}>
       <MapView
         ref={mapRef}
         flightPaths={flightPaths}
         nightHighlight={nightHighlight}
+        comparePins={compareOpen ? compareItems.filter((it) => it.place).map((it) => ({ lat: it.place!.lat, lon: it.place!.lon, label: COMPARE_LETTERS[compareItems.indexOf(it)], color: compareColor(compareItems.indexOf(it)), postcode: it.place!.postcode })) : []}
         target={target?.lat != null ? { lat: target.lat, lon: target.lon! } : null}
         report={report}
         live={live && aircraftAllowed ? { aircraft: live.aircraft ?? [], now: live.now } : null}
@@ -325,27 +371,62 @@ export default function App() {
         })}
       </div>
 
+      {compareOpen ? (
+        <CompareView
+          session={session}
+          postcodes={compareList}
+          recents={recents}
+          onAdd={addToCompare}
+          onRemove={(pc) => setCompareList((list) => list.filter((p) => !samePostcode(p, pc)))}
+          onClose={closeCompare}
+          onOpen={(pc) => select({ postcode: pc })}
+          onUnlock={unlock}
+          onItems={setCompareItems}
+        />
+      ) : (
       <Panel
-        session={session}
-        report={report}
-        error={error}
-        heading={target}
-        live={live}
-        onUnlock={unlock}
-        onPick={(pc) => select({ postcode: pc })}
-        recents={recents}
-        onNightHover={setNightHighlight}
-        onPlaceSelect={(lat, lon, key) => {
-          if (!visible.health) setVisible({ ...visible, health: true });
-          setNightHighlight(key);
-          mapRef.current?.flyTo(lat, lon);
-        }}
-        onNightSelect={(o) => {
-          if (!visible.transport) setVisible({ ...visible, transport: true });
-          setNightHighlight(optionKey(o));
-          mapRef.current?.flyTo(o.lat, o.lon);
-        }}
-      />
+          session={session}
+          onCompare={report ? () => addToCompare(report.place.postcode) : undefined}
+          inCompare={!!report && compareList.some((p) => samePostcode(p, report.place.postcode))}
+          report={report}
+          error={error}
+          heading={target}
+          live={live}
+          onUnlock={unlock}
+          onPick={(pc) => select({ postcode: pc })}
+          recents={recents}
+          onNightHover={setNightHighlight}
+          onPlaceSelect={(lat, lon, key) => {
+            if (!visible.health) setVisible({ ...visible, health: true });
+            setNightHighlight(key);
+            mapRef.current?.flyTo(lat, lon);
+          }}
+          onNightSelect={(o) => {
+            if (!visible.transport) setVisible({ ...visible, transport: true });
+            setNightHighlight(optionKey(o));
+            mapRef.current?.flyTo(o.lat, o.lon);
+          }}
+        />
+      )}
+
+      {!compareOpen && compareList.length > 0 && (
+        <div className="cmp-tray" role="region" aria-label="Postcodes to compare">
+          {compareList.map((pc, i) => (
+            <span key={pc} className="cmp-tray-item">
+              <span className="cmp-letter" style={{ background: compareColor(i) }}>
+                {COMPARE_LETTERS[i]}
+              </span>
+              <span className="num">{pc}</span>
+              <button className="cmp-x" onClick={() => setCompareList((list) => list.filter((p) => p !== pc))} aria-label={`Remove ${pc}`}>
+                ×
+              </button>
+            </span>
+          ))}
+          <button className="primary" onClick={openCompare}>
+            {compareList.length < 2 ? "Add one more to compare" : `Compare ${compareList.length}`}
+          </button>
+        </div>
+      )}
 
       {session?.dev_mode && (
         <label className="dev">

@@ -15,6 +15,8 @@ interface Props {
   onNightSelect?: (o: NightOption) => void;
   onPlaceSelect?: (lat: number, lon: number, key: string) => void; // fly to a GP, UTC or A&E
   recents?: { postcode: string; area: string; night_score?: number }[];
+  onCompare?: () => void; // add this postcode to the comparison
+  inCompare?: boolean;
 }
 
 const EXAMPLES = ["E1 6AN", "SW11 1AA", "TW3 3AD", "SE15 4QL", "E16 2PX"];
@@ -36,7 +38,7 @@ export function hourLabel(h: number) {
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect, onPlaceSelect, recents = [] }: Props) {
+export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect, onPlaceSelect, recents = [], onCompare, inCompare }: Props) {
   // "night" and "day" show the summaries; a number shows that hour (Pro).
   const [view, setView] = useState<View>("night");
 
@@ -90,7 +92,14 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
           <h1 className="num">{r?.place.postcode ?? heading.postcode.toUpperCase()}</h1>
           <p className="muted small">{r ? [r.place.ward, r.place.district].filter(Boolean).join(", ") : heading.area || " "}</p>
         </div>
-        {session && <span className={`plan plan-${session.plan}`}>{session.plans[session.plan]?.name}</span>}
+        <div className="head-actions">
+          {session && <span className={`plan plan-${session.plan}`}>{session.plans[session.plan]?.name}</span>}
+          {onCompare && (
+            <button className="cmp-add-btn" onClick={onCompare} disabled={inCompare} title={session?.features["compare"]?.allowed ? "Add to comparison" : "Comparisons are for supporters"}>
+              {inCompare ? "✓ In comparison" : "+ Compare"}
+            </button>
+          )}
+        </div>
       </header>
 
       {error ? (
@@ -184,7 +193,7 @@ function SupportNotice({ session, onSupport }: { session: Session | null; onSupp
     return (
       <div className="support support-thanks">
         <p className="small">
-          <strong>Thanks for supporting Overnight.</strong> Postcode comparisons are coming soon, and you'll have them as soon as they're ready.
+          <strong>Thanks for supporting Overnight.</strong> Use "+ Compare" on any report to compare up to 4 postcodes side by side.
         </p>
       </div>
     );
@@ -193,7 +202,7 @@ function SupportNotice({ session, onSupport }: { session: Session | null; onSupp
     <div className="support">
       <p className="small">
         <strong>Overnight is free.</strong> If it's useful, you can support the project with an optional one-off payment of {price.replace(" one-off", "")}.
-        Supporters get side-by-side postcode comparisons (coming soon).
+        Supporters can compare up to 4 postcodes side by side.
       </p>
       <button className="primary" onClick={onSupport}>
         Support Overnight · {price}

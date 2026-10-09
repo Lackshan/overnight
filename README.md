@@ -62,7 +62,7 @@ Every gated feature and limit lives in [features.yaml](features.yaml). There are
 |---|---|---|---|
 | Night and day scores, every hour of the night, crime by category, live aircraft, map layers | ✓ | ✓ | ✓ |
 | Section details, flight paths map, night transport and medical cards, live feed, saved recent searches | | ✓ | ✓ |
-| Compare postcodes side by side (coming soon) | | | ✓ |
+| Compare up to 4 postcodes side by side: scores, hour by hour, sections and key facts, with lettered map pins and a shareable `/compare?pc=` link | | | ✓ |
 
 ## Run locally
 
@@ -89,7 +89,7 @@ Without keys: no Supabase means everyone is a guest, no Stripe means the upgrade
 4. For the demo: Authentication → Providers → Email → turn off "Confirm email" so sign-up logs straight in.
 
 ### Stripe (test mode)
-Overnight is free; supporters make an optional one-off payment (£2.49) and get postcode comparisons (coming soon).
+Overnight is free; supporters make an optional one-off payment (£2.49) and get postcode comparisons.
 
 1. Product catalogue → add "Overnight supporter" with a **one-off** £2.49 price. Copy the price ID (`price_...`) to `STRIPE_PRICE_PRO`.
 2. Developers → API keys → secret key (`sk_test_...`) to `STRIPE_SECRET_KEY`.
@@ -114,6 +114,7 @@ Create a key, restrict it to your Railway domain (and localhost), and set `VITE_
 | `GET /api/session` | Your plan, what each feature looks like for you, limits, prices |
 | `GET /api/report/{postcode}` | The hour-by-hour report, stripped to your plan |
 | `GET /api/live?lat=&lon=&lines=` | Aircraft (with timestamps), nearby events and line status |
+| `GET /api/compare?pc=E16AN,SW111AA` | Supporters: scores, hourly line, section scores and key facts for up to `compare.postcodes` postcodes (the app asks for one at a time so each column fills in as soon as it's ready) |
 | `POST /api/billing/checkout` | Start Stripe Checkout |
 | `POST /api/billing/confirm` | Confirm a finished checkout (instant upgrade) |
 | `POST /api/billing/portal` | Stripe customer portal |

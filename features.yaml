@@ -83,3 +83,8 @@ limits:
     anonymous: 5
     free: 10
     pro: 25
+  # How many postcodes a supporter can compare side by side.
+  compare.postcodes:
+    anonymous: 0
+    free: 0
+    pro: 4
