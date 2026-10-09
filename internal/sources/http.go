@@ -61,6 +61,13 @@ func NewCache[T any](ttl time.Duration) *Cache[T] {
 	return &Cache[T]{ttl: ttl, items: map[string]cached[T]{}}
 }
 
+// Forget drops a cached value, e.g. one built from incomplete data.
+func (c *Cache[T]) Forget(key string) {
+	c.mu.Lock()
+	delete(c.items, key)
+	c.mu.Unlock()
+}
+
 func (c *Cache[T]) Get(ctx context.Context, key string, fetch func(context.Context) (T, error)) (T, error) {
 	c.mu.Lock()
 	item, ok := c.items[key]

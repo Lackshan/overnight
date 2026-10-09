@@ -108,6 +108,17 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
 @keyframes pulse { from { transform: scale(1); opacity: 0.6; } to { transform: scale(2.6); opacity: 0; } }
 
 .layers { position: absolute; left: 12px; bottom: 28px; z-index: 2; display: flex; gap: 6px; flex-wrap: wrap; max-width: calc(100vw - 420px); }
+.flight-slider {
+  position: absolute; z-index: 2; left: 12px; bottom: 98px; width: 280px; padding: 10px 12px 8px;
+  background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+}
+.fs-head { display: flex; align-items: center; gap: 8px; }
+.fs-play { width: 26px; height: 26px; padding: 0; justify-content: center; border-radius: 50%; color: var(--night); }
+.fs-title { font-size: 13px; font-weight: 600; }
+.fs-hour { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--night); }
+.flight-slider input[type="range"] { width: 100%; margin: 8px 0 2px; accent-color: var(--night); }
+.fs-axis { display: flex; justify-content: space-between; font-size: 10px; }
+.fs-note { margin-top: 4px; font-size: 11px; }
 .chip { height: 28px; border-radius: 999px; font-size: 12px; color: var(--text-muted); box-shadow: var(--shadow); }
 .chip.on { color: var(--text); }
 .chip:not(.on) .dot { opacity: 0.35; }
@@ -145,6 +156,40 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
 .detail .muted { text-align: right; }
 .tag { font-size: 10px; font-weight: 500; padding: 0 6px; border-radius: 4px; background: var(--surface-sunk); color: var(--text-muted); }
 
+.gh-summary { margin-bottom: 8px; }
+.gh-option { cursor: pointer; }
+.gh-option:hover, .gh-option:focus-visible { background: var(--surface-sunk); outline: none; }
+
+/* Night stops on the map: the panel's badges on a small card with a pin. */
+/* MapLibre sets transform on .nt-marker to position it, so never style its transform. */
+.nt-marker { cursor: default; }
+.nt-inner { display: flex; flex-direction: column; align-items: center; transition: transform 0.15s ease, opacity 0.15s ease; transform-origin: bottom center; }
+.nt-badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; max-width: 132px; padding: 3px; background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: 7px; box-shadow: var(--shadow); }
+.nt-badges .gh-badge { font-size: 10px; line-height: 14px; padding: 0 5px; }
+.nt-more { font-size: 10px; font-weight: 700; color: var(--text-secondary); padding: 0 3px; line-height: 14px; }
+.nt-pin { width: 2px; height: 8px; background: var(--text-secondary); }
+.nt-pin::after { content: ""; display: block; width: 6px; height: 6px; margin: 6px 0 0 -2px; border-radius: 50%; background: var(--text-secondary); border: 1.5px solid var(--surface); }
+.nt-marker.hl { z-index: 3; }
+.nt-marker.hl .nt-inner { transform: scale(1.18); }
+.nt-marker.hl .nt-badges { border-color: var(--night); box-shadow: 0 0 0 2px var(--night-bg), var(--shadow); }
+.nt-marker.dim .nt-inner { opacity: 0.35; }
+.gh-grid { display: flex; flex-direction: column; }
+.gh-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(7, 20px); align-items: center; min-height: 30px; border-top: 0.5px solid var(--border); }
+.gh-head { border-top: 0; min-height: 20px; }
+.gh-day { text-align: center; font-size: 11px; color: var(--text-muted); font-weight: 600; }
+.gh-day.tonight { color: var(--night); }
+.gh-what { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.gh-where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gh-badge { flex: none; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; color: #fff; line-height: 16px; }
+.gh-tube { border-radius: 9px; }
+.gh-nbus { background: #1C1C3A; color: #FFD100; }
+.gh-bus { background: #DC241F; }
+.gh-cell { height: 100%; display: flex; align-items: center; justify-content: center; }
+.gh-cell.tonight { background: var(--night-bg); }
+.gh-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--night); }
+.gh-none { width: 7px; height: 1.5px; background: var(--border-strong); border-radius: 1px; }
+.gh-more { align-self: flex-start; margin-top: 6px; }
+.gh-key, .gh-last { margin-top: 6px; }
 .feed { margin-top: 4px; }
 .feed-title { display: flex; align-items: center; gap: 8px; }
 .feed ul { list-style: none; margin: 0; padding: 0; }
@@ -275,5 +320,6 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
   .layers { bottom: calc(52vh + 10px); max-width: calc(100vw - 24px); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
   .layers .chip { flex: none; }
   .dev { bottom: auto; top: 96px; left: 12px; }
+  .flight-slider { bottom: calc(52vh + 48px); width: calc(100vw - 24px); }
   .search { width: calc(100vw - 72px); }
 }

@@ -17,6 +17,7 @@ type Station struct {
 	Distance float64  `json:"distance_m"`
 	Modes    []string `json:"modes"`
 	Lines    []Line   `json:"lines"`
+	IDs      []string `json:"-"` // every NaPTAN and hub ID for this station, to match night routes
 }
 
 type Line struct {
@@ -98,6 +99,11 @@ func StationsNear(ctx context.Context, lat, lon float64, radius int) ([]Station,
 			}
 			if sp.Distance < s.Distance {
 				s.Distance = sp.Distance
+			}
+			for _, id := range []string{sp.NaptanID, sp.HubCode} {
+				if id != "" && !contains(s.IDs, id) {
+					s.IDs = append(s.IDs, id)
+				}
 			}
 		}
 		out := make([]Station, 0, len(order))

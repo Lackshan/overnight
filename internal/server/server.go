@@ -20,6 +20,7 @@ import (
 	"overnight/internal/auth"
 	"overnight/internal/billing"
 	"overnight/internal/config"
+	"overnight/internal/history"
 	"overnight/internal/live"
 	"overnight/internal/report"
 	"overnight/internal/sources"
@@ -37,6 +38,10 @@ type Server struct {
 	DevMode  bool  // allows the X-Dev-Plan header for testing tiers locally
 
 	lookups lookupCounter
+
+	pathsMu sync.Mutex
+	paths   map[string]any
+	pathsAt time.Time
 }
 
 func (s *Server) Routes() http.Handler {
@@ -52,6 +57,7 @@ func (s *Server) Routes() http.Handler {
 		r.Get("/api/session", s.session)
 		r.Get("/api/report/{postcode}", s.report)
 		r.Get("/api/live", s.live)
+		r.Get("/api/flightpaths", s.flightPaths)
 		r.Post("/api/billing/checkout", s.requireUser(s.checkout))
 		r.Post("/api/billing/confirm", s.requireUser(s.confirm))
 		r.Post("/api/billing/portal", s.requireUser(s.portal))
@@ -176,6 +182,30 @@ func (s *Server) live(w http.ResponseWriter, r *http.Request) {
 		locked = append(locked, config.LiveFeed)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": snap, "locked": locked})
+}
+
+// flightPaths serves the hourly flight-path grid for the map slider. It's the
+// same for everyone, so it's rebuilt at most once a minute.
+func (s *Server) flightPaths(w http.ResponseWriter, r *http.Request) {
+	if !s.Features.Can(s.plan(r), config.MapOverflights) {
+		writeJSON(w, http.StatusForbidden, map[string]any{
+			"error":      "Sign up to see flight paths.",
+			"unlocks_on": s.Features.NextPlan(s.plan(r), config.MapOverflights),
+		})
+		return
+	}
+	s.pathsMu.Lock()
+	if s.paths == nil || time.Since(s.pathsAt) > time.Minute {
+		s.paths = map[string]any{
+			"hours": history.FlightPathHours,
+			"days":  s.Hub.Grid.DaysObserved(),
+			"cells": s.Hub.Grid.HeatCells(),
+		}
+		s.pathsAt = time.Now()
+	}
+	paths := s.paths
+	s.pathsMu.Unlock()
+	writeJSON(w, http.StatusOK, paths)
 }
 
 func (s *Server) requireUser(h func(http.ResponseWriter, *http.Request, *auth.User)) http.HandlerFunc {

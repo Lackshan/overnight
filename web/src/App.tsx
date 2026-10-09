@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, clearReports, loadReport, setDevPlan, setToken, supabase } from "./api";
 import AuthModal from "./AuthModal";
-import MapView, { type LayerKey } from "./MapView";
+import FlightSlider from "./FlightSlider";
+import { optionKey } from "./nightBadges";
+import MapView, { type LayerKey, type MapHandle } from "./MapView";
 import Panel from "./Panel";
 import Search from "./Search";
-import type { LiveSnapshot, PlanId, Report, Session } from "./types";
+import type { FlightPaths, LiveSnapshot, PlanId, Report, Session } from "./types";
 
 type Target = { postcode: string; lat?: number; lon?: number; area?: string };
 
@@ -12,10 +14,10 @@ const LONDON = { lat: 51.5072, lon: -0.1276 };
 
 const LAYERS: { key: LayerKey; label: string; feature: string; color: string }[] = [
   { key: "aircraft", label: "Live aircraft", feature: "map.aircraft", color: "#7F77DD" },
-  { key: "overflights", label: "Night flight paths", feature: "map.overflights", color: "#534AB7" },
+  { key: "overflights", label: "Flight paths", feature: "map.overflights", color: "#534AB7" },
   { key: "crime", label: "Crime", feature: "map.crime", color: "#D85A30" },
   { key: "air", label: "Air", feature: "map.air", color: "#1D9E75" },
-  { key: "transport", label: "Stations", feature: "map.transport", color: "#185FA5" },
+  { key: "transport", label: "Transport", feature: "map.transport", color: "#185FA5" },
 ];
 
 function postcodeFromPath() {
@@ -51,6 +53,9 @@ export default function App() {
   const upgradeAfterSignIn = useRef(false);
   // The visible map area; read by the live poll without restarting it.
   const bounds = useRef<[number, number, number, number] | undefined>(undefined);
+  const mapRef = useRef<MapHandle>(null);
+  const [flightPaths, setFlightPaths] = useState<FlightPaths | null>(null);
+  const [nightHighlight, setNightHighlight] = useState<string | null>(null);
 
   const plan = session?.plan ?? "anonymous";
 
@@ -154,6 +159,13 @@ export default function App() {
     };
   }, [focus.lat, focus.lon, lines.join(","), plan, session]);
 
+  // Flight paths are the same for everyone; load them once the plan allows it.
+  const pathsAllowed = session?.features["map.overflights"]?.allowed ?? false;
+  useEffect(() => {
+    if (!pathsAllowed) return setFlightPaths(null);
+    api.flightPaths().then(setFlightPaths).catch(() => {});
+  }, [pathsAllowed]);
+
   // Back/forward between postcodes.
   useEffect(() => {
     const onPop = () => {
@@ -216,6 +228,9 @@ export default function App() {
   return (
     <div className="app">
       <MapView
+        ref={mapRef}
+        flightPaths={flightPaths}
+        nightHighlight={nightHighlight}
         target={target?.lat != null ? { lat: target.lat, lon: target.lon! } : null}
         report={report}
         live={live && aircraftAllowed ? { aircraft: live.aircraft ?? [], now: live.now } : null}
@@ -260,6 +275,10 @@ export default function App() {
         )}
       </div>
 
+      {visible.overflights && flightPaths && (
+        <FlightSlider hours={flightPaths.hours} days={flightPaths.days} onPosition={(p) => mapRef.current?.setFlightHour(p)} />
+      )}
+
       <div className="layers">
         {LAYERS.map((l) => {
           const allowed = session?.features[l.feature]?.allowed ?? true;
@@ -286,6 +305,12 @@ export default function App() {
         live={live}
         onUnlock={unlock}
         onPick={(pc) => select({ postcode: pc })}
+        onNightHover={setNightHighlight}
+        onNightSelect={(o) => {
+          if (!visible.transport) setVisible({ ...visible, transport: true });
+          setNightHighlight(optionKey(o));
+          mapRef.current?.flyTo(o.lat, o.lon);
+        }}
       />
 
       {session?.dev_mode && (

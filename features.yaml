@@ -45,7 +45,7 @@ features:
     label: Live aircraft
     plans: [anonymous, free, pro]
   map.overflights:
-    label: Night flight paths
+    label: Flight paths by hour
     plans: [free, pro]
   map.crime:
     label: Crime map layer

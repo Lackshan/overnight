@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -38,9 +39,11 @@ type Report struct {
 	Hourly      []int             `json:"hourly,omitempty"` // overall score for each hour, 0 = midnight
 	Sections    []Section         `json:"sections,omitempty"`
 	Breakdown   []CategoryCount   `json:"breakdown,omitempty"`
+	GettingHome *GettingHome      `json:"getting_home,omitempty"`
 	Layers      Layers            `json:"layers"`
 	Lines       []string          `json:"lines"` // TfL line IDs serving the area, for the live feed
 	Locked      []string          `json:"locked"`
+	partial     bool              // built from incomplete data; not cached
 }
 
 type Score struct {
@@ -83,10 +86,9 @@ type CategoryCount struct {
 }
 
 type Layers struct {
-	Crime       []sources.Crime    `json:"crime,omitempty"`
-	Air         []sources.AirSite  `json:"air,omitempty"`
-	Stations    []sources.Station  `json:"stations,omitempty"`
-	Overflights []history.HeatCell `json:"overflights,omitempty"`
+	Crime    []sources.Crime   `json:"crime,omitempty"`
+	Air      []sources.AirSite `json:"air,omitempty"`
+	Stations []sources.Station `json:"stations,omitempty"`
 }
 
 type Builder struct {
@@ -104,16 +106,22 @@ func (b *Builder) Build(ctx context.Context, postcode string) (*Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	return b.cache.Get(ctx, place.Postcode, func(ctx context.Context) (*Report, error) {
+	r, err := b.cache.Get(ctx, place.Postcode, func(ctx context.Context) (*Report, error) {
 		return b.build(ctx, place)
 	})
+	if r != nil && r.partial {
+		b.cache.Forget(place.Postcode) // try the missing sources again next time
+	}
+	return r, err
 }
 
 func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, error) {
 	var (
 		crimes          []sources.Crime
 		stations        []sources.Station
-		buses           []sources.NightBus
+		buses           []sources.BusRoute
+		weeks           map[string]*sources.Week
+		partial         bool // some source failed: don't cache this report
 		airSites        []sources.AirSite
 		airHist         *sources.AirByHour
 		crimeErr, stErr error
@@ -122,7 +130,21 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error { crimes, crimeErr = sources.CrimesNear(gctx, p.Lat, p.Lon); return nil })
 	g.Go(func() error { stations, stErr = sources.StationsNear(gctx, p.Lat, p.Lon, RadiusM); return nil })
-	g.Go(func() error { buses, busErr = sources.NightBusesNear(gctx, p.Lat, p.Lon, BusRadiusM); return nil })
+	g.Go(func() error {
+		buses, busErr = sources.BusRoutesNear(gctx, p.Lat, p.Lon, BusRadiusM)
+		if busErr == nil {
+			var ok bool
+			// Night routes plus the nearest regular ones (to spot 24-hour routes).
+			// Without a TfL app key the rate limit only allows a few.
+			regular := 6
+			if os.Getenv("TFL_APP_KEY") != "" {
+				regular = 20
+			}
+			weeks, ok = sources.BusWeeks(gctx, buses, regular)
+			partial = partial || !ok
+		}
+		return nil
+	})
 	g.Go(func() error {
 		airSites, airErr = sources.AirSites(gctx)
 		if airErr != nil {
@@ -143,18 +165,21 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 	g.Wait()
 
 	prof := b.Hub.Grid.At(p.Lat, p.Lon)
-	r := &Report{Place: p, RadiusM: RadiusM, Generated: time.Now(), HistoryDays: b.Hub.Grid.DaysObserved()}
+	gh, ghOK := b.nightOptions(ctx, stations, buses, weeks)
+	partial = partial || !ghOK || crimeErr != nil || stErr != nil || busErr != nil || airErr != nil
+	r := &Report{Place: p, RadiusM: RadiusM, Generated: time.Now(), HistoryDays: b.Hub.Grid.DaysObserved(), partial: partial}
 
 	r.Lines = b.tflLines(stations)
 	r.Sections = []Section{
 		aircraftSection(prof, r.HistoryDays),
 		helicopterSection(prof, r.HistoryDays),
-		b.gettingHomeSection(stations, buses, stErr, busErr),
+		b.gettingHomeSection(stations, gh, stErr, busErr),
 		airSection(p, airSites, airHist),
 		safetySection(crimes, crimeErr),
 		emergencySection(prof),
 	}
 	r.Breakdown = breakdown(crimes)
+	r.GettingHome = gh
 
 	// Overall score per hour, weighted across sections that have data.
 	weights := map[string]float64{"aircraft": .25, "helicopters": .1, "getting_home": .2, "air": .15, "safety": .2, "emergency": .1}
@@ -189,7 +214,7 @@ func (b *Builder) build(ctx context.Context, p *sources.Postcode) (*Report, erro
 	r.Night = &Score{Score: n, Band: nightBand(n)}
 	r.Day = &Score{Score: d, Band: dayBand(d)}
 
-	r.Layers = Layers{Crime: crimes, Stations: stations, Overflights: b.Hub.Grid.HeatCells()}
+	r.Layers = Layers{Crime: crimes, Stations: stations}
 	for _, s := range airSites {
 		if live.DistanceM(p.Lat, p.Lon, s.Lat, s.Lon) <= 10000 {
 			r.Layers.Air = append(r.Layers.Air, s)
@@ -341,34 +366,140 @@ func allHours() []int {
 	return h
 }
 
+// NightOption is one way home after midnight and the nights it runs.
+type NightOption struct {
+	Kind     string       `json:"kind"`  // night_tube, night_overground, night_bus, all_night_bus
+	Line     string       `json:"line"`  // "Central", "N205", "25"
+	Where    string       `json:"where"` // station or stop
+	Lat      float64      `json:"lat"`
+	Lon      float64      `json:"lon"`
+	Distance float64      `json:"distance_m"`
+	Nights   sources.Week `json:"nights"` // Monday night first; null where it doesn't run
+}
+
+// LastBus is a regular route's last departure on a weeknight.
+type LastBus struct {
+	Route string `json:"route"`
+	Stop  string `json:"stop"`
+	Time  string `json:"time"`
+}
+
+type GettingHome struct {
+	Options   []NightOption `json:"options"`
+	LastBuses []LastBus     `json:"last_buses,omitempty"`
+}
+
+// nightOptions finds the Night Tube stations and all-night buses nearby.
+func (b *Builder) nightOptions(ctx context.Context, stations []sources.Station, buses []sources.BusRoute, weeks map[string]*sources.Week) (*GettingHome, bool) {
+	gh := &GettingHome{Options: []NightOption{}}
+	ok := true
+	// Night Tube: the nearest station on each night line that the night service calls at.
+	done := map[string]bool{}
+	for _, st := range stations { // nearest first
+		for _, l := range st.Lines {
+			info, ok := sources.NightTubeLines[l.ID]
+			if !ok || done[l.ID] {
+				continue
+			}
+			served, err := sources.NightStations(ctx, l.ID)
+			if err != nil {
+				ok = false
+				continue
+			}
+			for _, id := range st.IDs {
+				if served[id] {
+					done[l.ID] = true
+					kind := "night_tube"
+					if l.ID == "windrush" {
+						kind = "night_overground"
+					}
+					var w sources.Week
+					w[4] = &sources.NightService{PerHour: info.PerHour, Approx: true} // Friday night
+					w[5] = &sources.NightService{PerHour: info.PerHour, Approx: true} // Saturday night
+					gh.Options = append(gh.Options, NightOption{Kind: kind, Line: info.Name, Where: st.Name, Lat: st.Lat, Lon: st.Lon, Distance: math.Round(st.Distance/10) * 10, Nights: w})
+					break
+				}
+			}
+		}
+	}
+	// Buses running at least hourly between 1am and 5am count as all-night on
+	// that night. Routes that only squeeze in a late trip are "last buses".
+	var lasts []LastBus
+	for _, r := range buses {
+		w := weeks[r.ID]
+		if w == nil {
+			continue
+		}
+		var nights sources.Week
+		any := false
+		for i, n := range w {
+			if n != nil && n.PerHour >= 1 {
+				nights[i] = &sources.NightService{PerHour: n.PerHour}
+				any = true
+			}
+		}
+		if any {
+			kind := "night_bus"
+			if !isNightRoute(r.ID) {
+				kind = "all_night_bus"
+			}
+			gh.Options = append(gh.Options, NightOption{Kind: kind, Line: r.Name, Where: r.StopName, Lat: r.Lat, Lon: r.Lon, Distance: math.Round(r.Distance/10) * 10, Nights: nights})
+		} else if n := w[0]; n != nil && n.Last != "" { // Monday night, as a typical weeknight
+			lasts = append(lasts, LastBus{Route: r.Name, Stop: r.StopName, Time: n.Last})
+		}
+	}
+	// Latest first, treating times before 5am as after midnight.
+	late := func(t string) string {
+		if t < "05:00" {
+			return "1" + t
+		}
+		return "0" + t
+	}
+	sort.Slice(lasts, func(i, j int) bool { return late(lasts[i].Time) > late(lasts[j].Time) })
+	if len(lasts) > 3 {
+		lasts = lasts[:3]
+	}
+	gh.LastBuses = lasts
+	return gh, ok
+}
+
+func isNightRoute(id string) bool {
+	return len(id) > 1 && id[0] == 'n' && id[1] >= '0' && id[1] <= '9'
+}
+
 // Getting home: what still runs at each hour.
-func (b *Builder) gettingHomeSection(stations []sources.Station, buses []sources.NightBus, stErr, busErr error) Section {
+func (b *Builder) gettingHomeSection(stations []sources.Station, gh *GettingHome, stErr, busErr error) Section {
 	s := Section{ID: "getting_home", Label: "Getting home", Unit: "ways home", Measured: true}
 	if stErr != nil && busErr != nil {
 		s.Headline = "TfL data unavailable right now"
 		return s
 	}
-	lines := map[string]string{}
-	nightTube := map[string][]string{} // line -> stations
+	lines := map[string]bool{}
 	for _, st := range stations {
 		for _, l := range st.Lines {
-			ls, ok := b.Hub.LineStatus(l.ID)
-			if !ok {
-				continue
-			}
-			lines[l.ID] = ls.Name
-			if name, ok := sources.NightTubeLines[l.ID]; ok && !contains(nightTube[name], st.Name) {
-				nightTube[name] = append(nightTube[name], st.Name)
+			if _, ok := b.Hub.LineStatus(l.ID); ok {
+				lines[l.ID] = true
 			}
 		}
 	}
-	dayValue := float64(len(lines) + len(buses))
-	dayScore := clamp(15 + 22*float64(len(stations)) + 6*float64(len(lines)))
-	nightValue := float64(len(buses))
-	nightScore := clamp(15 + 14*float64(len(buses)))
-	if len(nightTube) > 0 {
-		nightScore = clamp(nightScore + 15) // weekends only, so half credit
+	// Night: average departures an hour across the week, from everything nearby.
+	var weekPerHour float64
+	var buses, tubes []string
+	for _, o := range gh.Options {
+		for _, n := range o.Nights {
+			if n != nil {
+				weekPerHour += n.PerHour / 7
+			}
+		}
+		if o.Kind == "night_tube" || o.Kind == "night_overground" {
+			tubes = append(tubes, o.Line)
+		} else {
+			buses = append(buses, o.Line)
+		}
 	}
+	dayScore := clamp(15 + 22*float64(len(stations)) + 6*float64(len(lines)))
+	nightScore := clamp(10 + 7*weekPerHour)
+	dayValue, nightValue := float64(len(lines)), float64(len(gh.Options))
 	for h := 0; h < 24; h++ {
 		switch {
 		case h >= 1 && h < 5: // tube and most buses stop
@@ -381,32 +512,14 @@ func (b *Builder) gettingHomeSection(stations []sources.Station, buses []sources
 	}
 	switch len(buses) {
 	case 0:
-		s.Headline = "No night buses within 500 m"
+		s.Headline = "No buses after 1am within 500 m"
 	case 1:
-		s.Headline = fmt.Sprintf("1 night bus (%s) within 500 m", buses[0].Route)
+		s.Headline = fmt.Sprintf("1 all-night bus (%s) within 500 m", buses[0])
 	default:
-		var routes []string
-		for _, b := range buses {
-			routes = append(routes, b.Route)
-		}
-		s.Headline = fmt.Sprintf("%d night buses within 500 m (%s)", len(buses), joinMax(routes, 3))
+		s.Headline = fmt.Sprintf("%d all-night buses within 500 m (%s)", len(buses), joinMax(buses, 3))
 	}
-	if len(nightTube) > 0 {
-		var names []string
-		for l := range nightTube {
-			names = append(names, l)
-		}
-		sort.Strings(names)
-		s.Headline += fmt.Sprintf(". Night Tube on Fridays and Saturdays (%s)", strings.Join(names, ", "))
-		for _, l := range names {
-			s.Details = append(s.Details, Detail{Label: l + " Night Tube", Value: strings.Join(nightTube[l], ", ")})
-		}
-	}
-	for i, b := range buses {
-		if i == 4 {
-			break
-		}
-		s.Details = append(s.Details, Detail{Label: b.Route, Value: fmt.Sprintf("%s · %.0f m", b.StopName, math.Round(b.Distance/10)*10)})
+	if len(tubes) > 0 {
+		s.Headline += fmt.Sprintf(", Night Tube on Friday and Saturday nights (%s)", strings.Join(tubes, ", "))
 	}
 	s.DayLine = fmt.Sprintf("%s and %s within %d m by day", plural(len(stations), "station"), plural(len(lines), "line"), RadiusM)
 	return s.finish()
@@ -625,6 +738,9 @@ func Gate(r *Report, plan string, f *config.Features) *Report {
 			out.Sections[i] = s
 		}
 	}
+	if !f.Can(plan, config.ReportDetails) {
+		out.GettingHome = nil
+	}
 	if lock(config.SafetyBreakdown) {
 		out.Breakdown = nil
 	}
@@ -636,9 +752,6 @@ func Gate(r *Report, plan string, f *config.Features) *Report {
 	}
 	if lock(config.MapTransport) {
 		out.Layers.Stations = nil
-	}
-	if lock(config.MapOverflights) {
-		out.Layers.Overflights = nil
 	}
 	return &out
 }

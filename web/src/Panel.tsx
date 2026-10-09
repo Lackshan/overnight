@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { LiveSnapshot, Point, Report, Section, Session } from "./types";
+import GettingHome from "./GettingHome";
+import type { LiveSnapshot, NightOption, Point, Report, Section, Session } from "./types";
 
 interface Props {
   session: Session | null;
@@ -9,6 +10,8 @@ interface Props {
   live: LiveSnapshot | null;
   onUnlock: (feature: string) => void;
   onPick: (postcode: string) => void;
+  onNightHover?: (key: string | null) => void;
+  onNightSelect?: (o: NightOption) => void;
 }
 
 const EXAMPLES = ["E1 6AN", "SW11 1AA", "TW3 3AD", "SE15 4QL", "E16 2PX"];
@@ -30,7 +33,7 @@ export function hourLabel(h: number) {
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-export default function Panel({ session, report, error, heading, live, onUnlock, onPick }: Props) {
+export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect }: Props) {
   // "night" and "day" show the summaries; a number shows that hour (Pro).
   const [view, setView] = useState<View>("night");
 
@@ -105,6 +108,17 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
             </div>
           ) : (
             <Locked feature="report.sections" session={session} onUnlock={onUnlock} />
+          )}
+
+          {r.getting_home ? (
+            <GettingHome data={r.getting_home} onHover={onNightHover} onSelect={onNightSelect} />
+          ) : (
+            r.sections && (
+              <>
+                <h2>Getting home after midnight</h2>
+                <Locked feature="report.details" session={session} onUnlock={onUnlock} compact text="Every bus and Tube that runs after midnight, night by night" />
+              </>
+            )
           )}
 
           <Feed live={live} session={session} onUnlock={onUnlock} />

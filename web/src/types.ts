@@ -82,11 +82,11 @@ export interface Report {
   hourly?: number[];
   sections?: Section[];
   breakdown?: { category: string; label: string; count: number }[];
+  getting_home?: GettingHome;
   layers: {
     crime?: Crime[];
     air?: AirSite[];
     stations?: Station[];
-    overflights?: { lat: number; lon: number; passes: number }[];
   };
   lines: string[];
   locked: string[];
@@ -123,4 +123,31 @@ export interface LiveSnapshot {
   aircraft_nearby: number;
   events?: LiveEvent[];
   lines?: { id: string; name: string; severity: number; status: string }[];
+}
+
+// Average aircraft per hour on a ~1 km grid, for the flight-path slider.
+export interface FlightPaths {
+  hours: number[]; // e.g. [21, 22, 23, 0, ..., 9]
+  days: number; // days of data behind the averages
+  cells: { lat: number; lon: number; h: number[] }[]; // h[i] is for hours[i]
+}
+
+export interface NightService {
+  per_hour: number; // departures an hour between 1am and 5am
+  approx?: boolean; // TfL's published frequency rather than a timetable
+}
+
+export interface NightOption {
+  kind: "night_tube" | "night_overground" | "night_bus" | "all_night_bus";
+  line: string;
+  where: string;
+  lat: number;
+  lon: number;
+  distance_m: number;
+  nights: (NightService | null)[]; // Monday night first
+}
+
+export interface GettingHome {
+  options: NightOption[];
+  last_buses?: { route: string; stop: string; time: string }[];
 }

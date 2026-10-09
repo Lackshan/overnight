@@ -195,8 +195,12 @@ func (g *Grid) At(lat, lon float64) Profile {
 	return p
 }
 
-// HeatCells returns night-time (11pm to 6am) average passes per cell, for the
-// map's overflight layer.
+// FlightPathHours are the hours the map's flight-path slider covers, in
+// order: 9pm through to the 9am–10am slot.
+var FlightPathHours = []int{21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+
+// HeatCells returns, for each cell with traffic, the average number of
+// aircraft passing per hour for each of FlightPathHours.
 func (g *Grid) HeatCells() []HeatCell {
 	g.mu.RLock()
 	defer g.mu.RUnlock()
@@ -208,28 +212,28 @@ func (g *Grid) HeatCells() []HeatCell {
 	}
 	var out []HeatCell
 	for cell, c := range g.cells {
-		var n float64
-		for _, h := range NightHours {
+		hc := HeatCell{Hourly: make([]float64, len(FlightPathHours))}
+		var any bool
+		for i, h := range FlightPathHours {
 			if days[h] > 0 {
-				n += c.Passes[h] / days[h]
+				hc.Hourly[i] = round1(c.Passes[h] / days[h])
+				any = any || hc.Hourly[i] >= 0.3
 			}
 		}
-		if n >= 0.5 {
+		if any {
 			r, col := int(cell)/cols, int(cell)%cols
-			out = append(out, HeatCell{
-				Lat:    round4(MinLat + (float64(r)+0.5)*cellLat),
-				Lon:    round4(MinLon + (float64(col)+0.5)*cellLon),
-				Passes: round1(n),
-			})
+			hc.Lat = round4(MinLat + (float64(r)+0.5)*cellLat)
+			hc.Lon = round4(MinLon + (float64(col)+0.5)*cellLon)
+			out = append(out, hc)
 		}
 	}
 	return out
 }
 
 type HeatCell struct {
-	Lat    float64 `json:"lat"`
-	Lon    float64 `json:"lon"`
-	Passes float64 `json:"passes"` // per night
+	Lat    float64   `json:"lat"`
+	Lon    float64   `json:"lon"`
+	Hourly []float64 `json:"h"` // aircraft per hour, one per FlightPathHours entry
 }
 
 // NightHours are 11pm to 6am, in order.

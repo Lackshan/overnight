@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import type { LiveSnapshot, Report, Session } from "./types";
+import type { FlightPaths, LiveSnapshot, Report, Session } from "./types";
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -48,6 +48,7 @@ export const api = {
     call<{ snapshot: LiveSnapshot; locked: string[] }>(
       `/api/live?lat=${lat}&lon=${lon}&lines=${encodeURIComponent(lines.join(","))}${bbox ? `&bbox=${bbox.map((v) => v.toFixed(3)).join(",")}` : ""}`,
     ),
+  flightPaths: () => call<FlightPaths>("/api/flightpaths"),
   checkout: (returnPath: string) =>
     call<{ url: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ return_path: returnPath }) }),
   confirm: (sessionId: string) =>

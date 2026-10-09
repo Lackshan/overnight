@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { Map as MLMap, Marker, Popup, setWorkerUrl, type GeoJSONSource, type MapLayerMouseEvent, type RasterTileSource } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 // MapLibre v6 ships its worker as a separate file; let Vite copy it and tell MapLibre where it is.
@@ -6,7 +6,8 @@ import workerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?url";
 import { AircraftLayer } from "./aircraft";
 import { TYPES } from "./aircraftTypes";
 import { drawAircraft, drawRotor } from "./silhouettes";
-import type { Aircraft, Report } from "./types";
+import { badgeClass, badgeStyle, isRail, optionKey } from "./nightBadges";
+import type { Aircraft, FlightPaths, NightOption, Report } from "./types";
 
 setWorkerUrl(workerUrl);
 
@@ -20,6 +21,27 @@ interface Props {
   dark: boolean;
   // Called with the visible area (padded) whenever the map moves.
   onBounds?: (bbox: [number, number, number, number]) => void;
+  flightPaths: FlightPaths | null;
+  nightHighlight: string | null; // optionKey of the night service hovered in the panel
+}
+
+export interface MapHandle {
+  // Show flight paths at a fractional position along flightPaths.hours.
+  setFlightHour: (pos: number) => void;
+  // Centre the map on a point, e.g. a night bus stop picked in the panel.
+  flyTo: (lat: number, lon: number) => void;
+}
+
+// Heatmap weight for a position between two hourly stops: a linear blend of
+// the two hours' counts, so playback cross-fades instead of jumping. About
+// 12 aircraft an hour through a cell counts as full intensity, for every hour
+// alike, so quiet hours look quiet.
+function flightWeight(pos: number, stops: number) {
+  const i = Math.max(0, Math.min(stops - 1, Math.floor(pos)));
+  const j = Math.min(stops - 1, i + 1);
+  const f = pos - i;
+  const blend = ["+", ["*", 1 - f, ["get", `h${i}`]], ["*", f, ["get", `h${j}`]]];
+  return ["interpolate", ["linear"], blend, 0, 0, 12, 1];
 }
 
 const MAPTILER_KEY = import.meta.env.VITE_MAPTILER_KEY as string | undefined;
@@ -70,13 +92,30 @@ const layerIds: Record<Exclude<LayerKey, "aircraft">, string[]> = {
   transport: ["stations"],
 };
 
-export default function MapView({ target, report, live, visible, dark, onBounds }: Props) {
+const MapView = forwardRef<MapHandle, Props>(function MapView({ target, report, live, visible, dark, onBounds, flightPaths, nightHighlight }, ref) {
   const box = useRef<HTMLDivElement>(null);
   const map = useRef<MLMap | null>(null);
   const planes = useRef<AircraftLayer | null>(null);
   const pin = useRef<Marker | null>(null);
-  const latest = useRef({ report, visible, live, onBounds });
-  latest.current = { report, visible, live, onBounds };
+  const latest = useRef({ report, visible, live, onBounds, flightPaths });
+  latest.current = { report, visible, live, onBounds, flightPaths };
+  const flightPos = useRef(0);
+
+  const applyFlightHour = () => {
+    const m = map.current, fp = latest.current.flightPaths;
+    if (m?.getLayer("overflights") && fp) m.setPaintProperty("overflights", "heatmap-weight", flightWeight(flightPos.current, fp.hours.length) as never);
+  };
+  useImperativeHandle(ref, () => ({
+    setFlightHour: (pos: number) => {
+      flightPos.current = pos;
+      applyFlightHour();
+    },
+    flyTo: (lat: number, lon: number) => {
+      const m = map.current;
+      if (m) m.flyTo({ center: [lon, lat], zoom: Math.max(m.getZoom(), 16), duration: 700, padding: sidePadding() });
+    },
+  }));
+  const nightMarkers = useRef<{ marker: Marker; keys: string[]; el: HTMLElement }[]>([]);
 
   // Create the map once and never re-create it.
   useEffect(() => {
@@ -105,7 +144,7 @@ export default function MapView({ target, report, live, visible, dark, onBounds 
       m.addLayer({
         id: "overflights", type: "heatmap", source: "overflights",
         paint: {
-          "heatmap-weight": ["interpolate", ["linear"], ["get", "passes"], 0, 0, 30, 1],
+          "heatmap-weight": 0,
           "heatmap-radius": ["interpolate", ["exponential", 2], ["zoom"], 9, 14, 12, 60, 15, 400],
           "heatmap-intensity": 0.7,
           "heatmap-opacity": 0.55,
@@ -158,8 +197,10 @@ export default function MapView({ target, report, live, visible, dark, onBounds 
         m.on("mouseleave", id, () => (m.getCanvas().style.cursor = ""));
       }
 
-      const { report, visible, live } = latest.current;
+      const { report, visible, live, flightPaths } = latest.current;
       applyReport(m, report);
+      applyFlightPaths(m, flightPaths);
+      applyFlightHour();
       applyVisibility(m, visible);
       planes.current.setVisible(visible.aircraft);
       if (live) planes.current.ingest(live.aircraft, live.now);
@@ -222,7 +263,86 @@ export default function MapView({ target, report, live, visible, dark, onBounds 
     if (live) planes.current?.ingest(live.aircraft, live.now);
   }, [live]);
 
+  useEffect(() => {
+    if (!map.current) return;
+    applyFlightPaths(map.current, flightPaths);
+    applyFlightHour();
+  }, [flightPaths]);
+
+  // Night bus stops and Night Tube stations, marked with the same badges as
+  // the panel. Routes sharing a stop share one marker.
+  useEffect(() => {
+    const m = map.current;
+    for (const n of nightMarkers.current) n.marker.remove();
+    nightMarkers.current = [];
+    if (!m) return;
+    const groups = new Map<string, NightOption[]>();
+    for (const o of report?.getting_home?.options ?? []) {
+      const k = `${o.lat.toFixed(5)},${o.lon.toFixed(5)}`;
+      groups.set(k, [...(groups.get(k) ?? []), o]);
+    }
+    for (const g of groups.values()) {
+      g.sort((a, b) => Number(isRail(b)) - Number(isRail(a))); // rail first
+      const el = document.createElement("div");
+      el.className = "nt-marker";
+      const card = document.createElement("div");
+      card.className = "nt-badges";
+      for (const o of g.slice(0, 4)) {
+        const b = document.createElement("span");
+        b.className = badgeClass(o);
+        Object.assign(b.style, badgeStyle(o));
+        b.textContent = o.line;
+        card.appendChild(b);
+      }
+      if (g.length > 4) {
+        const more = document.createElement("span");
+        more.className = "nt-more";
+        more.textContent = `+${g.length - 4}`;
+        card.appendChild(more);
+      }
+      const pin = document.createElement("div");
+      pin.className = "nt-pin";
+      // MapLibre positions the marker with a transform on `el`, so any
+      // scaling happens on this inner wrapper instead.
+      const inner = document.createElement("div");
+      inner.className = "nt-inner";
+      inner.append(card, pin);
+      el.append(inner);
+      el.title = `${g[0].where}: ${g.map((o) => o.line).join(", ")}`;
+      el.style.display = latest.current.visible.transport ? "" : "none";
+      const marker = new Marker({ element: el, anchor: "bottom" }).setLngLat([g[0].lon, g[0].lat]).addTo(m);
+      nightMarkers.current.push({ marker, keys: g.map(optionKey), el });
+    }
+  }, [report]);
+
+  useEffect(() => {
+    for (const n of nightMarkers.current) {
+      n.el.style.display = visible.transport ? "" : "none";
+    }
+  }, [visible.transport]);
+
+  useEffect(() => {
+    for (const n of nightMarkers.current) {
+      const on = !!nightHighlight && n.keys.includes(nightHighlight);
+      n.el.classList.toggle("hl", on);
+      n.el.classList.toggle("dim", !!nightHighlight && !on);
+    }
+  }, [nightHighlight, report]);
+
   return <div ref={box} className="map" />;
+});
+
+export default MapView;
+
+// One point per grid cell, with each hour's count as h0, h1, ... so the
+// heatmap can pick an hour with a paint property instead of new data.
+function applyFlightPaths(m: MLMap, fp: FlightPaths | null) {
+  const features: GeoJSON.Feature[] = (fp?.cells ?? []).map((c) => ({
+    type: "Feature",
+    geometry: { type: "Point", coordinates: [c.lon, c.lat] },
+    properties: Object.fromEntries(c.h.map((v, i) => [`h${i}`, v])),
+  }));
+  (m.getSource("overflights") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features });
 }
 
 function sidePadding() {
@@ -237,7 +357,6 @@ function applyReport(m: MLMap, r: Report | null) {
     return;
   }
   set("radius", circle(r.place.lat, r.place.lon, r.radius_m));
-  set("overflights", points(r.layers.overflights, (c) => ({ passes: c.passes })));
   set("crime", points(r.layers.crime, (c) => ({ label: crimeLabel(c.category), street: c.street })));
   set("air", points(r.layers.air, (a) => ({ name: a.name, index: a.index, band: a.band, pollutant: a.pollutant })));
   set("stations", points(r.layers.stations, (s) => ({ name: s.name, lines: s.lines.map((l) => l.name).join(", ") })));
