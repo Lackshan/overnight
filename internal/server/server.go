@@ -58,6 +58,9 @@ func (s *Server) Routes() http.Handler {
 		r.Get("/api/report/{postcode}", s.report)
 		r.Get("/api/live", s.live)
 		r.Get("/api/flightpaths", s.flightPaths)
+		r.Get("/api/recent", s.requireUser(s.recent))
+		r.Post("/api/recent", s.requireUser(s.addRecent))
+		r.Delete("/api/recent", s.requireUser(s.deleteRecent))
 		r.Post("/api/billing/checkout", s.requireUser(s.checkout))
 		r.Post("/api/billing/confirm", s.requireUser(s.confirm))
 		r.Post("/api/billing/portal", s.requireUser(s.portal))
@@ -208,6 +211,66 @@ func (s *Server) flightPaths(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, paths)
 }
 
+func (s *Server) recentLimit(r *http.Request) int {
+	if n := s.Features.Limit(s.plan(r), config.LimitRecent); n > 0 {
+		return n
+	}
+	return 50
+}
+
+func (s *Server) recent(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	list, err := s.Store.Recent(r.Context(), u.ID, s.recentLimit(r))
+	if err != nil {
+		log.Printf("recent: %v", err)
+		writeError(w, http.StatusInternalServerError, "Couldn't load your recent searches.")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"recent": list})
+}
+
+// addRecent records one search, or several at once ("items") when a guest's
+// browser history is merged into their new account.
+func (s *Server) addRecent(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	var body struct {
+		store.Recent
+		Items []store.Recent `json:"items"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<10)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "Bad request.")
+		return
+	}
+	items := body.Items
+	if body.Postcode != "" {
+		items = append(items, body.Recent)
+	}
+	limit := s.recentLimit(r)
+	for _, it := range items {
+		it.Postcode = strings.ToUpper(strings.TrimSpace(it.Postcode))
+		if len(it.Postcode) < 5 || len(it.Postcode) > 8 || len(it.Area) > 120 {
+			continue
+		}
+		if it.At.IsZero() || it.At.After(time.Now()) {
+			it.At = time.Now()
+		}
+		if err := s.Store.AddRecent(r.Context(), u.ID, it, limit); err != nil {
+			log.Printf("recent: %v", err)
+			writeError(w, http.StatusInternalServerError, "Couldn't save your search.")
+			return
+		}
+	}
+	s.recent(w, r, u)
+}
+
+func (s *Server) deleteRecent(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	// ?postcode=E1 6AN removes one; no postcode clears them all.
+	if err := s.Store.DeleteRecent(r.Context(), u.ID, strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("postcode")))); err != nil {
+		log.Printf("recent: %v", err)
+		writeError(w, http.StatusInternalServerError, "Couldn't update your recent searches.")
+		return
+	}
+	s.recent(w, r, u)
+}
+
 func (s *Server) requireUser(h func(http.ResponseWriter, *http.Request, *auth.User)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		u := auth.FromContext(r.Context())
@@ -232,6 +295,10 @@ func readBillingReq(r *http.Request) billingReq {
 
 func (s *Server) checkout(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	url, err := s.Billing.Checkout(r.Context(), u, readBillingReq(r).ReturnPath)
+	if errors.Is(err, billing.ErrAlreadySupporter) {
+		writeError(w, http.StatusConflict, billingMessage(err))
+		return
+	}
 	if err != nil {
 		log.Printf("checkout: %v", err)
 		writeError(w, http.StatusBadGateway, billingMessage(err))
@@ -262,6 +329,9 @@ func (s *Server) portal(w http.ResponseWriter, r *http.Request, u *auth.User) {
 func billingMessage(err error) string {
 	if errors.Is(err, billing.ErrNotConfigured) {
 		return "Payments aren't set up on this server yet."
+	}
+	if errors.Is(err, billing.ErrAlreadySupporter) {
+		return "You're already a supporter. Thank you."
 	}
 	return "Couldn't reach the payment provider. Try again."
 }

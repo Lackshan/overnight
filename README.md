@@ -48,13 +48,13 @@ The server polls adsb.lol for everything within 40 nautical miles of London (eve
 
 ## Who sees what: `features.yaml`
 
-Every gated feature and limit lives in [features.yaml](features.yaml). There are three plans: `anonymous` (signed out), `free` (signed in) and `pro` (paying). The API strips anything a plan can't see, and the UI reads `GET /api/session` to show locks and pick "Sign up free" or "Go Pro". Edit the file and restart. Typos fail at startup.
+Every gated feature and limit lives in [features.yaml](features.yaml). There are three plans: `anonymous` (signed out), `free` (signed in) and `pro`, shown as "Supporter" (made the optional one-off payment). The API strips anything a plan can't see, and the UI reads `GET /api/session` to show locks and pick "Sign up free" or "Support". Edit the file and restart. Typos fail at startup.
 
 | Feature | Guest | Free | Pro |
 |---|---|---|---|
-| Night and day scores, section summaries, live aircraft | ✓ | ✓ | ✓ |
-| Section details, night flight paths map, live "happening nearby" feed | | ✓ | ✓ |
-| Every hour of the night (timeline), crime by category | | | ✓ |
+| Night and day scores, every hour of the night, crime by category, live aircraft, map layers | ✓ | ✓ | ✓ |
+| Section details, flight paths map, night transport and medical cards, live feed, saved recent searches | | ✓ | ✓ |
+| Compare postcodes side by side (coming soon) | | | ✓ |
 
 ## Run locally
 
@@ -81,13 +81,14 @@ Without keys: no Supabase means everyone is a guest, no Stripe means the upgrade
 4. For the demo: Authentication → Providers → Email → turn off "Confirm email" so sign-up logs straight in.
 
 ### Stripe (test mode)
-1. Product catalogue → add "Overnight Pro" with a recurring £4.99/month price. Copy the price ID to `STRIPE_PRICE_PRO`. For a one-off price instead, set `checkout_mode: payment` in `features.yaml`.
-2. Developers → API keys → secret key to `STRIPE_SECRET_KEY`.
-3. Developers → Webhooks → add endpoint `https://YOUR-APP/api/stripe/webhook` with events `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.updated` and `customer.subscription.deleted`. Copy the signing secret to `STRIPE_WEBHOOK_SECRET`.
-4. Optional: Settings → Billing → Customer portal → activate it so "Manage billing" works.
-5. Pay with test card `4242 4242 4242 4242`, any future date, any CVC.
+Overnight is free; supporters make an optional one-off payment (£2.49) and get postcode comparisons (coming soon).
 
-Locally, forward webhooks with the Stripe CLI: `stripe listen --forward-to localhost:8080/api/stripe/webhook`. Users are also upgraded the moment they land back on the app, so this is a backup.
+1. Product catalogue → add "Overnight supporter" with a **one-off** £2.49 price. Copy the price ID (`price_...`) to `STRIPE_PRICE_PRO`.
+2. Developers → API keys → secret key (`sk_test_...`) to `STRIPE_SECRET_KEY`.
+3. Developers → Webhooks → add endpoint `https://YOUR-APP/api/stripe/webhook` with events `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `charge.refunded` and `charge.dispute.created`. Copy the signing secret to `STRIPE_WEBHOOK_SECRET`. A full refund or a dispute takes supporter status away again.
+4. Pay with test card `4242 4242 4242 4242`, any future date, any CVC.
+
+Locally, forward webhooks with the Stripe CLI: `stripe listen --forward-to localhost:8080/api/stripe/webhook --events checkout.session.completed,checkout.session.async_payment_succeeded,charge.refunded,charge.dispute.created`. Supporters are also upgraded the moment they land back on the app, so this is a backup. To switch to a subscription instead, set `checkout_mode: subscription` in `features.yaml` and add the `customer.subscription.updated` and `customer.subscription.deleted` events.
 
 ### MapTiler
 Create a key, restrict it to your Railway domain (and localhost), and set `VITE_MAPTILER_KEY`. The map uses the `dataviz` and `dataviz-dark` styles.

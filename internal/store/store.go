@@ -30,6 +30,7 @@ type Store interface {
 	// Blobs hold small binary snapshots, like the recorded flight history.
 	GetBlob(ctx context.Context, key string) ([]byte, error)
 	PutBlob(ctx context.Context, key string, data []byte) error
+	Recents
 }
 
 //go:embed schema.sql
@@ -110,12 +111,15 @@ func (p *Postgres) PutBlob(ctx context.Context, key string, data []byte) error {
 
 // Memory keeps plans in memory and blobs in files under dir, for local dev.
 type Memory struct {
-	dir string
-	mu  sync.Mutex
-	m   map[string]Account
+	dir     string
+	mu      sync.Mutex
+	m       map[string]Account
+	recents map[string][]Recent
 }
 
-func NewMemory(dir string) *Memory { return &Memory{dir: dir, m: map[string]Account{}} }
+func NewMemory(dir string) *Memory {
+	return &Memory{dir: dir, m: map[string]Account{}, recents: map[string][]Recent{}}
+}
 
 func (s *Memory) GetBlob(_ context.Context, key string) ([]byte, error) {
 	data, err := os.ReadFile(filepath.Join(s.dir, key))

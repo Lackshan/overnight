@@ -3,6 +3,7 @@ import { ApiError, api, clearReports, loadReport, setDevPlan, setToken, supabase
 import AuthModal from "./AuthModal";
 import FlightSlider from "./FlightSlider";
 import { optionKey } from "./nightBadges";
+import { addLocal, localRecents, removeLocal, syncOnSignIn, type RecentSearch } from "./recent";
 import MapView, { type LayerKey, type MapHandle } from "./MapView";
 import Panel from "./Panel";
 import Search from "./Search";
@@ -57,6 +58,7 @@ export default function App() {
   const mapRef = useRef<MapHandle>(null);
   const [flightPaths, setFlightPaths] = useState<FlightPaths | null>(null);
   const [nightHighlight, setNightHighlight] = useState<string | null>(null);
+  const [recents, setRecents] = useState<RecentSearch[]>([]);
 
   const plan = session?.plan ?? "anonymous";
 
@@ -113,7 +115,7 @@ export default function App() {
       const s = await api.confirm(id);
       clearReports();
       setSession(s);
-      flash("You're on Pro. Everything's unlocked.");
+      flash("Thanks for supporting Overnight. Comparisons are coming soon.");
     } catch (e) {
       flash(e instanceof Error ? e.message : "Couldn't confirm your payment yet. Refresh in a moment.");
     }
@@ -128,6 +130,7 @@ export default function App() {
       .then((r) => {
         if (stale) return;
         setReport(r);
+        recordRecent(r);
         if (target.lat == null) setTarget({ ...target, lat: r.place.lat, lon: r.place.lon, area: [r.place.ward, r.place.district].filter(Boolean).join(", ") });
       })
       .catch((e) => {
@@ -159,6 +162,34 @@ export default function App() {
       clearInterval(t);
     };
   }, [focus.lat, focus.lon, lines.join(","), plan, session]);
+
+  // Recent searches: the account's when signed in (merging any made as a
+  // guest), otherwise this browser's.
+  const signedIn = !!session?.email;
+  const recentLimit = session?.limits["recent.searches"] || 10;
+  useEffect(() => {
+    if (!session) return;
+    if (signedIn) syncOnSignIn().then(setRecents).catch(() => setRecents([]));
+    else setRecents(localRecents(recentLimit));
+  }, [signedIn, recentLimit, !!session]);
+
+  const recordRecent = (r: Report) => {
+    const entry: RecentSearch = {
+      postcode: r.place.postcode,
+      area: [r.place.ward, r.place.district].filter(Boolean).join(", "),
+      lat: r.place.lat,
+      lon: r.place.lon,
+      night_score: r.night?.score,
+      at: new Date().toISOString(),
+    };
+    if (signedIn) api.addRecent(entry).then((res) => setRecents(res.recent)).catch(() => {});
+    else setRecents(addLocal(entry, recentLimit));
+  };
+
+  const removeRecent = (postcode: string | null) => {
+    if (signedIn) api.removeRecent(postcode).then((res) => setRecents(res.recent)).catch(() => {});
+    else setRecents(removeLocal(postcode));
+  };
 
   // Flight paths are the same for everyone; load them once the plan allows it.
   const pathsAllowed = session?.features["map.overflights"]?.allowed ?? false;
@@ -201,7 +232,7 @@ export default function App() {
     if (!signedIn) {
       upgradeAfterSignIn.current = next === "pro";
       setAuth({
-        reason: next === "pro" ? "Create a free account first, then you'll go straight to checkout." : `Sign up free to see ${session?.features[feature]?.label.toLowerCase()}.`,
+        reason: next === "pro" ? "Create a free account first, then you'll go straight to the optional one-off payment." : `Sign up free to see ${session?.features[feature]?.label.toLowerCase()}.`,
         thenUpgrade: next === "pro",
       });
       return;
@@ -212,16 +243,6 @@ export default function App() {
   const signOut = async () => {
     setMenu(false);
     await supabase?.auth.signOut();
-  };
-
-  const manageBilling = async () => {
-    setMenu(false);
-    try {
-      const { url } = await api.portal(location.pathname);
-      location.href = url;
-    } catch (e) {
-      flash(e instanceof Error ? e.message : "Couldn't open billing.");
-    }
   };
 
   const aircraftAllowed = session?.features["map.aircraft"]?.allowed ?? false;
@@ -241,7 +262,13 @@ export default function App() {
       />
 
       <div className="top-left">
-        <Search value={report?.place.postcode ?? ""} onSelect={select} onPreview={(pc) => session && loadReport(pc, plan).catch(() => {})} />
+        <Search
+          value={report?.place.postcode ?? ""}
+          recents={recents}
+          onSelect={select}
+          onPreview={(pc) => session && loadReport(pc, plan).catch(() => {})}
+          onRemoveRecent={removeRecent}
+        />
         <div className="live-pill">
           <span className="pulse" aria-hidden="true" />
           Live · <Clock /> · <span className="num">{live?.aircraft_nearby ?? "–"}</span> aircraft nearby
@@ -259,10 +286,10 @@ export default function App() {
                 <p className="small">{session.email}</p>
                 <p className="small muted">{session.plans[session.plan]?.name} plan</p>
                 {session.plan === "pro" ? (
-                  <button onClick={manageBilling}>Manage billing</button>
+                  <p className="small supporter">Thanks for supporting Overnight</p>
                 ) : (
                   <button className="primary" onClick={() => (setMenu(false), startCheckout())}>
-                    Go Pro · {session.plans.pro?.price_label}
+                    Support · {session.plans.pro?.price_label}
                   </button>
                 )}
                 <button onClick={signOut}>Sign out</button>
@@ -306,6 +333,7 @@ export default function App() {
         live={live}
         onUnlock={unlock}
         onPick={(pc) => select({ postcode: pc })}
+        recents={recents}
         onNightHover={setNightHighlight}
         onPlaceSelect={(lat, lon, key) => {
           if (!visible.health) setVisible({ ...visible, health: true });

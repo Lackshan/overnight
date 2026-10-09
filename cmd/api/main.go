@@ -51,7 +51,7 @@ func main() {
 	pro := features.Plans[config.PlanPro]
 	bill := billing.New(
 		os.Getenv("STRIPE_SECRET_KEY"), os.Getenv("STRIPE_WEBHOOK_SECRET"),
-		strings.TrimRight(env("APP_URL", "http://localhost:5173"), "/"),
+		strings.TrimRight(env("APP_URL", "http://localhost:8080"), "/"),
 		pro, os.Getenv(pro.StripePriceEnv), st,
 	)
 

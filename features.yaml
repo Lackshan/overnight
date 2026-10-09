@@ -3,8 +3,8 @@
 # Every gated part of the app has a key under `features`. `plans` lists the
 # plans that can see it. There are three plans:
 #   anonymous  not signed in
-#   free       signed in, not paying
-#   pro        paying
+#   free       signed in
+#   pro        supporters: made the optional one-off payment
 #
 # The API strips anything the caller's plan can't see, so this file is the
 # single source of truth. The UI reads GET /api/session to know what to show
@@ -17,9 +17,9 @@ plans:
   free:
     name: Free
   pro:
-    name: Pro
-    price_label: "£4.99 / month"
-    checkout_mode: subscription # "subscription" or "payment" (one-off)
+    name: Supporter
+    price_label: "£2.49 one-off"
+    checkout_mode: payment # "payment" (one-off) or "subscription"
     stripe_price_env: STRIPE_PRICE_PRO # env var holding the Stripe price ID
 
 # Cheapest to most expensive. Used to work out the next plan to upsell.
@@ -37,9 +37,12 @@ features:
     plans: [free, pro]
   report.timeline:
     label: Every hour of the night
-    plans: [pro]
+    plans: [anonymous, free, pro]
   safety.breakdown:
     label: Crime by category
+    plans: [anonymous, free, pro]
+  compare:
+    label: Compare postcodes side by side
     plans: [pro]
   map.aircraft:
     label: Live aircraft
@@ -74,3 +77,9 @@ limits:
     anonymous: 0
     free: 3
     pro: 20
+  # Guests' recent searches stay in their browser; signed-in users' are saved
+  # to their account, so they follow them across devices.
+  recent.searches:
+    anonymous: 5
+    free: 10
+    pro: 25

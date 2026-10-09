@@ -1,4 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { RecentSearch } from "./recent";
 import type { FlightPaths, LiveSnapshot, Report, Session } from "./types";
 
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
@@ -49,6 +50,10 @@ export const api = {
       `/api/live?lat=${lat}&lon=${lon}&lines=${encodeURIComponent(lines.join(","))}${bbox ? `&bbox=${bbox.map((v) => v.toFixed(3)).join(",")}` : ""}`,
     ),
   flightPaths: () => call<FlightPaths>("/api/flightpaths"),
+  recent: () => call<{ recent: RecentSearch[] }>("/api/recent"),
+  addRecent: (body: RecentSearch | { items: RecentSearch[] }) => call<{ recent: RecentSearch[] }>("/api/recent", { method: "POST", body: JSON.stringify(body) }),
+  removeRecent: (postcode: string | null) =>
+    call<{ recent: RecentSearch[] }>(`/api/recent${postcode ? `?postcode=${encodeURIComponent(postcode)}` : ""}`, { method: "DELETE" }),
   checkout: (returnPath: string) =>
     call<{ url: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ return_path: returnPath }) }),
   confirm: (sessionId: string) =>

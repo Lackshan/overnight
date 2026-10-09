@@ -1,6 +1,8 @@
-// Package billing upgrades users through Stripe Checkout. A user becomes Pro
-// either when they land back on the app (Confirm, instant) or when Stripe's
-// webhook arrives (backup, and the only path for cancellations).
+// Package billing takes the optional supporter payment through Stripe
+// Checkout. A user becomes a supporter either when they land back on the app
+// (Confirm, instant) or when Stripe's webhook arrives (backup). Refunds and
+// disputes, which only arrive by webhook, take it away again. Subscription
+// mode is still supported if features.yaml switches back to it.
 package billing
 
 import (
@@ -26,12 +28,15 @@ type Billing struct {
 	store         store.Store
 }
 
-var ErrNotConfigured = errors.New("payments aren't set up: STRIPE_SECRET_KEY or the Pro price ID is missing")
+var (
+	ErrNotConfigured    = errors.New("payments aren't set up: STRIPE_SECRET_KEY or the supporter price ID is missing")
+	ErrAlreadySupporter = errors.New("already a supporter")
+)
 
 func New(secretKey, webhookSecret, appURL string, pro config.Plan, priceID string, st store.Store) *Billing {
 	b := &Billing{webhookSecret: webhookSecret, appURL: appURL, priceID: priceID, mode: pro.CheckoutMode, store: st}
 	if b.mode == "" {
-		b.mode = "subscription"
+		b.mode = "payment"
 	}
 	if secretKey != "" {
 		b.sc = stripe.NewClient(secretKey)
@@ -46,10 +51,14 @@ func (b *Billing) ready() error {
 	return nil
 }
 
-// Checkout starts a Stripe Checkout session for the Pro plan and returns its URL.
+// Checkout starts a Stripe Checkout session for the supporter payment and returns its URL.
 func (b *Billing) Checkout(ctx context.Context, u *auth.User, returnPath string) (string, error) {
 	if err := b.ready(); err != nil {
 		return "", err
+	}
+	acct, _ := b.store.Get(ctx, u.ID)
+	if acct != nil && acct.Plan == config.PlanPro {
+		return "", ErrAlreadySupporter
 	}
 	if returnPath == "" || returnPath[0] != '/' {
 		returnPath = "/"
@@ -68,8 +77,16 @@ func (b *Billing) Checkout(ctx context.Context, u *auth.User, returnPath string)
 	if b.mode == "subscription" {
 		p.SubscriptionData = &stripe.CheckoutSessionCreateSubscriptionDataParams{}
 		p.SubscriptionData.AddMetadata("user_id", u.ID)
+	} else {
+		// One-off: make Stripe create a customer, so a later refund or dispute
+		// can be traced back to this user.
+		p.PaymentIntentData = &stripe.CheckoutSessionCreatePaymentIntentDataParams{}
+		p.PaymentIntentData.AddMetadata("user_id", u.ID)
+		if acct == nil || acct.CustomerID == "" {
+			p.CustomerCreation = stripe.String(string(stripe.CheckoutSessionCustomerCreationAlways))
+		}
 	}
-	if acct, _ := b.store.Get(ctx, u.ID); acct != nil && acct.CustomerID != "" {
+	if acct != nil && acct.CustomerID != "" {
 		p.Customer = stripe.String(acct.CustomerID)
 	} else if u.Email != "" {
 		p.CustomerEmail = stripe.String(u.Email)
@@ -152,6 +169,28 @@ func (b *Billing) HandleWebhook(ctx context.Context, payload []byte, sig string)
 			return nil // not one of ours
 		}
 		return b.fulfil(ctx, &s)
+	case "charge.refunded":
+		var c stripe.Charge
+		if err := c.UnmarshalJSON(ev.Data.Raw); err != nil {
+			return err
+		}
+		if !c.Refunded { // partial refund: keep supporter status
+			return nil
+		}
+		return b.revoke(ctx, &c, "refund")
+	case "charge.dispute.created":
+		var d stripe.Dispute
+		if err := d.UnmarshalJSON(ev.Data.Raw); err != nil {
+			return err
+		}
+		if d.Charge == nil {
+			return nil
+		}
+		c, err := b.sc.V1Charges.Retrieve(ctx, d.Charge.ID, nil)
+		if err != nil {
+			return err
+		}
+		return b.revoke(ctx, c, "dispute")
 	case "customer.subscription.updated", "customer.subscription.deleted":
 		var sub stripe.Subscription
 		if err := sub.UnmarshalJSON(ev.Data.Raw); err != nil {
@@ -160,6 +199,25 @@ func (b *Billing) HandleWebhook(ctx context.Context, payload []byte, sig string)
 		return b.syncSubscription(ctx, &sub, ev.Type == "customer.subscription.deleted")
 	}
 	return nil
+}
+
+// revoke drops a supporter back to free after a full refund or a dispute.
+func (b *Billing) revoke(ctx context.Context, c *stripe.Charge, why string) error {
+	userID := c.Metadata["user_id"]
+	if userID == "" && c.PaymentIntent != nil && c.PaymentIntent.Metadata != nil {
+		userID = c.PaymentIntent.Metadata["user_id"]
+	}
+	if userID == "" && c.Customer != nil {
+		if a, _ := b.store.ByCustomer(ctx, c.Customer.ID); a != nil {
+			userID = a.UserID
+		}
+	}
+	if userID == "" {
+		log.Printf("billing: %s on charge %s with no matching user", why, c.ID)
+		return nil
+	}
+	log.Printf("billing: %s on charge %s, user %s back to free", why, c.ID, userID)
+	return b.store.Put(ctx, store.Account{UserID: userID, Plan: config.PlanFree})
 }
 
 func (b *Billing) syncSubscription(ctx context.Context, sub *stripe.Subscription, deleted bool) error {

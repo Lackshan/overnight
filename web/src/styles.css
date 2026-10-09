@@ -82,7 +82,7 @@ button.wide { width: 100%; justify-content: center; height: 38px; }
 .top-right { position: absolute; top: 12px; right: 12px; z-index: 3; }
 @media (min-width: 761px) { .top-right { right: 392px; } }
 
-.search { position: relative; width: 300px; max-width: calc(100vw - 80px); }
+.search { position: relative; z-index: 4; width: 300px; max-width: calc(100vw - 80px); }
 .search-box {
   display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 10px;
   background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow); color: var(--text-muted);
@@ -94,8 +94,19 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
   position: absolute; top: 44px; left: 0; right: 0; margin: 0; padding: 4px; list-style: none;
   background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow);
 }
-.search-list li { display: flex; gap: 10px; align-items: baseline; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.search-list ul { margin: 0; padding: 0; list-style: none; }
+.search-list li { display: flex; gap: 8px; align-items: center; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; }
 .search-list li .muted { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.search-head { display: flex; justify-content: space-between; align-items: center; padding: 4px 8px 2px; }
+.search-area { flex: 1; min-width: 0; }
+.recent-icon { color: var(--text-muted); flex: none; }
+.recent-score { font-size: 12px; font-weight: 600; }
+.recent-ago { flex: none; font-size: 11px; }
+.recent-x { width: 22px; height: 22px; padding: 0; justify-content: center; border: 0; background: none; color: var(--text-muted); font-size: 15px; border-radius: 5px; flex: none; }
+.recent-x:hover { color: var(--text); }
+.recent-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; }
+.recent-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; text-align: left; }
+.recent-row-area { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .search-list li.active { background: var(--surface-sunk); }
 
 .live-pill {
@@ -297,6 +308,10 @@ kbd { font: 11px var(--font); color: var(--text-muted); border: 0.5px solid var(
 .dev select { font: inherit; background: none; color: var(--text); border: 0; }
 
 .eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; color: var(--night); margin-bottom: 6px; }
+.support { margin-top: 18px; padding: 12px; border-radius: 10px; background: var(--night-bg); display: flex; flex-direction: column; gap: 10px; }
+.support button { align-self: flex-start; }
+.support-thanks { background: var(--surface-sunk); }
+.supporter { color: var(--night); font-weight: 600; }
 .footnote { margin-top: 20px; padding-top: 12px; border-top: 0.5px solid var(--border); color: var(--text-muted); }
 
 .scores { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 14px 0 4px; }

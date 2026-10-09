@@ -14,6 +14,7 @@ interface Props {
   onNightHover?: (key: string | null) => void;
   onNightSelect?: (o: NightOption) => void;
   onPlaceSelect?: (lat: number, lon: number, key: string) => void; // fly to a GP, UTC or A&E
+  recents?: { postcode: string; area: string; night_score?: number }[];
 }
 
 const EXAMPLES = ["E1 6AN", "SW11 1AA", "TW3 3AD", "SE15 4QL", "E16 2PX"];
@@ -35,7 +36,7 @@ export function hourLabel(h: number) {
   return h < 12 ? `${h}am` : `${h - 12}pm`;
 }
 
-export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect, onPlaceSelect }: Props) {
+export default function Panel({ session, report, error, heading, live, onUnlock, onPick, onNightHover, onNightSelect, onPlaceSelect, recents = [] }: Props) {
   // "night" and "day" show the summaries; a number shows that hour (Pro).
   const [view, setView] = useState<View>("night");
 
@@ -48,6 +49,24 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
           You viewed the flat on a Saturday afternoon. See what it's like when you're trying to sleep: planes, police helicopters, night buses, air and
           crime, hour by hour, from live and recorded data.
         </p>
+        {recents.length > 0 && (
+          <>
+            <p className="label">Your recent searches</p>
+            <div className="recent-list">
+              {recents.slice(0, 5).map((r) => (
+                <button key={r.postcode} className="recent-row" onClick={() => onPick(r.postcode)}>
+                  <span className="num">{r.postcode}</span>
+                  <span className="muted small recent-row-area">{r.area}</span>
+                  {r.night_score != null && (
+                    <span className="num recent-score" style={{ color: scoreColor(r.night_score) }}>
+                      {r.night_score}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <p className="label">Try one</p>
         <div className="chips">
           {EXAMPLES.map((pc) => (
@@ -145,6 +164,8 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
             </Locked>
           )}
 
+          <SupportNotice session={session} onSupport={() => onUnlock("compare")} />
+
           <p className="footnote small muted">
             Planes and helicopters: {r.history_days} day{r.history_days === 1 ? "" : "s"} of recorded ADS-B data, plus live tracking. Air: London Air
             Quality Network. Crime: data.police.uk. Transport: TfL.
@@ -152,6 +173,32 @@ export default function Panel({ session, report, error, heading, live, onUnlock,
         </>
       )}
     </aside>
+  );
+}
+
+// The optional one-off payment. Supporters see a thank-you instead.
+function SupportNotice({ session, onSupport }: { session: Session | null; onSupport: () => void }) {
+  if (!session) return null;
+  const price = session.plans.pro?.price_label ?? "";
+  if (session.plan === "pro") {
+    return (
+      <div className="support support-thanks">
+        <p className="small">
+          <strong>Thanks for supporting Overnight.</strong> Postcode comparisons are coming soon, and you'll have them as soon as they're ready.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="support">
+      <p className="small">
+        <strong>Overnight is free.</strong> If it's useful, you can support the project with an optional one-off payment of {price.replace(" one-off", "")}.
+        Supporters get side-by-side postcode comparisons (coming soon).
+      </p>
+      <button className="primary" onClick={onSupport}>
+        Support Overnight · {price}
+      </button>
+    </div>
   );
 }
 
@@ -396,7 +443,7 @@ function Breakdown({ items }: { items: { label: string; count: number }[] }) {
 function Locked({ feature, session, onUnlock, compact, text, children }: { feature: string; session: Session | null; onUnlock: (f: string) => void; compact?: boolean; text?: string; children?: ReactNode }) {
   const f = session?.features[feature];
   const next = f?.unlocks_on;
-  const label = next === "free" ? "Sign up free" : next === "pro" ? `Go Pro · ${session?.plans.pro?.price_label ?? ""}` : "Unavailable";
+  const label = next === "free" ? "Sign up free" : next === "pro" ? `Support · ${session?.plans.pro?.price_label ?? ""}` : "Unavailable";
   const button = (
     <button className={next === "pro" ? "primary" : ""} onClick={() => onUnlock(feature)} disabled={!next}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
